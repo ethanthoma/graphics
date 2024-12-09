@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
 
     addWgpuNative(b, exe);
     addGlfw3(b, exe);
+    addGLFWWebGPU(b, exe);
     addShader(b, exe);
 
     b.installArtifact(exe);
@@ -55,8 +56,12 @@ fn addWgpuNative(b: *std.Build, exe: *std.Build.Step.Compile) void {
     exe.linkSystemLibrary("gcc_s");
 }
 
+fn addGLFWWebGPU(b: *std.Build, exe: *std.Build.Step.Compile) void {
+    exe.addIncludePath(b.path("include/glfw3webgpu-v1.2.0"));
+}
+
 fn addShader(b: *std.Build, exe: *std.Build.Step.Compile) void {
-    exe.root_module.addAnonymousImport("compute-shader", .{
-        .root_source_file = b.path("src/compute-shader.wgsl"),
+    exe.root_module.addAnonymousImport("shader", .{
+        .root_source_file = b.path("src/shader.wgsl"),
     });
 }

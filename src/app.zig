@@ -11,6 +11,10 @@ const wgpu = @cImport({
     @cInclude("wgpu.h");
 });
 
+const glfw3_wgpu = @cImport({
+    @cInclude("glfw3webgpu.h");
+});
+
 const Error = error{
     FailedToInitializeGLFW,
     FailedToOpenWindow,
@@ -20,15 +24,19 @@ const Error = error{
     FailedToGetQueue,
     FailedToGetWaylandDisplay,
     FailedToGetWaylandWindow,
+    FailedToGetTextureView,
+    FailedToGetCurrentTexture,
 };
 
 pub const App = struct {
     const Self = @This();
 
     window: *glfw3.GLFWwindow,
-    device: *wgpu.WGPUDevice,
-    queue: *wgpu.WGPUQueue,
-    surface: *wgpu.WGPUSurface,
+    device: wgpu.WGPUDevice,
+    queue: wgpu.WGPUQueue,
+    surface: wgpu.WGPUSurface,
+    surfaceFormat: wgpu.WGPUTextureFormat,
+    pipeline: wgpu.WGPURenderPipeline,
 
     pub fn init() !Self {
         // Open window
@@ -39,15 +47,16 @@ pub const App = struct {
         }
         errdefer glfw3.glfwTerminate();
 
+        // Set window hints BEFORE window creation
+        glfw3.glfwWindowHint(glfw3.GLFW_CLIENT_API, glfw3.GLFW_NO_API);
+        glfw3.glfwWindowHint(glfw3.GLFW_RESIZABLE, glfw3.GLFW_FALSE);
+
         std.debug.print("Opening window\n", .{});
         const window: *glfw3.GLFWwindow = glfw3.glfwCreateWindow(640, 480, "VOXEL", null, null) orelse {
             std.debug.print("Failed to open window\n", .{});
             return Error.FailedToOpenWindow;
         };
         errdefer glfw3.glfwDestroyWindow(window);
-
-        glfw3.glfwWindowHint(glfw3.GLFW_CLIENT_API, glfw3.GLFW_NO_API);
-        glfw3.glfwWindowHint(glfw3.GLFW_RESIZABLE, glfw3.GLFW_TRUE);
 
         // Create instance
         std.debug.print("Creating instance\n", .{});
@@ -59,79 +68,223 @@ pub const App = struct {
 
         // Create surface
         std.debug.print("Creating surface\n", .{});
-        var surface = try glfwGetWGPUSurface(instance, window);
+        const surface = try glfwGetWGPUSurface(instance, window);
         errdefer wgpu.wgpuSurfaceRelease(surface);
 
-        // Get adpater
-        std.debug.print("Get adpater\n", .{});
-        const adapter: wgpu.WGPUAdapter = retval: {
-            const options = wgpu.WGPURequestAdapterOptions{
-                .nextInChain = null,
-                .compatibleSurface = surface,
-            };
-
-            break :retval requestAdapterSync(instance, &options) orelse {
-                std.debug.print("Failed to get adapter\n", .{});
-                return Error.FailedToGetAdapter;
-            };
-        };
-        errdefer wgpu.wgpuAdapterRelease(adapter);
+        // Get adapter
+        std.debug.print("Get adapter\n", .{});
+        const adapter = try requestAdapterSync(instance, &.{
+            .nextInChain = null,
+            .compatibleSurface = surface,
+        }) orelse return Error.FailedToGetAdapter;
+        defer wgpu.wgpuAdapterRelease(adapter);
 
         // Get device
         std.debug.print("Get device\n", .{});
-        var device: wgpu.WGPUDevice = retval: {
-            const descriptor = wgpu.WGPUDeviceDescriptor{
-                .nextInChain = null,
-                .label = "My Device",
-                .requiredFeatureCount = 0,
-                .requiredLimits = null,
-                .defaultQueue = .{
-                    .nextInChain = null,
-                    .label = "The default queue",
-                },
-            };
-
-            break :retval requestDeviceSync(adapter, &descriptor) orelse {
-                std.debug.print("Failed to get adapter\n", .{});
-                return Error.FailedToGetDevice;
-            };
-        };
-        errdefer wgpu.wgpuDeviceRelease(device);
-
-        std.debug.print("Get queue\n", .{});
-        var queue: wgpu.WGPUQueue = retval: {
-            if (wgpu.wgpuDeviceGetQueue(device)) |queue| {
-                break :retval queue;
-            } else {
-                std.debug.print("Failed to get queue\n", .{});
-                return Error.FailedToGetQueue;
+        const deviceCallback = struct {
+            pub fn onDeviceLost(reason: wgpu.WGPUDeviceLostReason, message: [*c]const u8, _: ?*anyopaque) callconv(.C) void {
+                std.debug.print("Device lost: reason {} message: {s}\n", .{ reason, message });
             }
         };
-        errdefer wgpu.wgpuQueueRelease(queue);
 
-        glfw3.glfwMakeContextCurrent(window);
+        const device = requestDeviceSync(adapter, &.{
+            .nextInChain = null,
+            .label = "My Device",
+            .requiredFeatureCount = 0,
+            .requiredLimits = null,
+            .defaultQueue = .{
+                .nextInChain = null,
+                .label = "The default queue",
+            },
+            .deviceLostCallback = deviceCallback.onDeviceLost,
+        }) orelse return Error.FailedToGetDevice;
+
+        // Get queue
+        std.debug.print("Get queue\n", .{});
+        const queue = wgpu.wgpuDeviceGetQueue(device) orelse return Error.FailedToGetQueue;
+
+        // Configure surface
+        std.debug.print("Configure surface\n", .{});
+
+        var capabilites: wgpu.WGPUSurfaceCapabilities = .{};
+        _ = wgpu.wgpuSurfaceGetCapabilities(surface, adapter, &capabilites); // returns false on failure
+        const preferredFormat: wgpu.WGPUTextureFormat = capabilites.formats[0];
+
+        wgpu.wgpuSurfaceConfigure(surface, &.{
+            .nextInChain = null,
+            .width = 640,
+            .height = 480,
+            .usage = wgpu.WGPUTextureUsage_RenderAttachment,
+            .format = preferredFormat,
+            .viewFormatCount = 0,
+            .viewFormats = null,
+            .device = device,
+            .presentMode = wgpu.WGPUPresentMode_Fifo,
+            .alphaMode = wgpu.WGPUCompositeAlphaMode_Auto,
+        });
+
         glfw3.glfwShowWindow(window);
+
+        const pipeline = initializePipeline(device, preferredFormat);
 
         return Self{
             .window = window,
-            .device = &device,
-            .queue = &queue,
-            .surface = &surface,
+            .device = device,
+            .queue = queue,
+            .surface = surface,
+            .surfaceFormat = preferredFormat,
+            .pipeline = pipeline,
         };
-    }
-
-    pub fn deinit(self: *Self) void {
-        wgpu.wgpuQueueRelease(self.queue.*);
-        wgpu.wgpuSurfaceRelease(self.surface.*);
-        wgpu.wgpuDeviceRelease(self.device.*);
-        glfw3.glfwDestroyWindow(self.window);
-        glfw3.glfwTerminate();
     }
 
     pub fn run(self: *Self) void {
         glfw3.glfwPollEvents();
-        _ = wgpu.wgpuDevicePoll(self.device.*, 0, null);
-        glfw3.glfwSwapBuffers(self.window);
+        defer _ = wgpu.wgpuDevicePoll(self.device, 0, null);
+
+        // setup target view
+        const targetView = self.getNextSurfaceTextureView() catch return;
+        defer wgpu.wgpuTextureViewRelease(targetView);
+
+        // setup encoder
+        const encoder = wgpu.wgpuDeviceCreateCommandEncoder(self.device, &.{
+            .nextInChain = null,
+            .label = "my command encoder",
+        });
+        defer wgpu.wgpuCommandEncoderRelease(encoder);
+
+        // setup renderpass
+        const renderPass = wgpu.wgpuCommandEncoderBeginRenderPass(encoder, &.{
+            .nextInChain = null,
+            .colorAttachmentCount = 1,
+            .colorAttachments = &[_]wgpu.WGPURenderPassColorAttachment{.{
+                .view = targetView,
+                .resolveTarget = null,
+                .loadOp = wgpu.WGPULoadOp_Clear,
+                .storeOp = wgpu.WGPUStoreOp_Store,
+                .clearValue = wgpu.WGPUColor{ .r = 0.9, .g = 0.1, .b = 0.2, .a = 1.0 },
+            }},
+            .depthStencilAttachment = null,
+            .timestampWrites = null,
+        });
+
+        wgpu.wgpuRenderPassEncoderSetPipeline(renderPass, self.pipeline);
+
+        wgpu.wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
+
+        wgpu.wgpuRenderPassEncoderEnd(renderPass);
+        wgpu.wgpuRenderPassEncoderRelease(renderPass);
+
+        const command = wgpu.wgpuCommandEncoderFinish(encoder, &.{
+            .nextInChain = null,
+            .label = "command buffer",
+        });
+        defer wgpu.wgpuCommandBufferRelease(command);
+
+        wgpu.wgpuQueueSubmit(self.queue, 1, &command);
+
+        wgpu.wgpuSurfacePresent(self.surface);
+    }
+
+    fn getNextSurfaceTextureView(self: *Self) !wgpu.WGPUTextureView {
+        var surfaceTexture: wgpu.WGPUSurfaceTexture = .{};
+
+        wgpu.wgpuSurfaceGetCurrentTexture(self.surface, &surfaceTexture);
+
+        if (surfaceTexture.status != wgpu.WGPUSurfaceGetCurrentTextureStatus_Success) {
+            std.debug.print("Failed to get current texture: {}\n", .{surfaceTexture.status});
+            return Error.FailedToGetCurrentTexture;
+        }
+
+        return wgpu.wgpuTextureCreateView(surfaceTexture.texture, &.{
+            .nextInChain = null,
+            .label = "Surface texture view",
+            .format = wgpu.wgpuTextureGetFormat(surfaceTexture.texture),
+            .dimension = wgpu.WGPUTextureViewDimension_2D,
+            .baseMipLevel = 0,
+            .mipLevelCount = 1,
+            .baseArrayLayer = 0,
+            .arrayLayerCount = 1,
+            .aspect = wgpu.WGPUTextureAspect_All,
+        });
+    }
+
+    fn initializePipeline(device: wgpu.WGPUDevice, surfaceFormat: wgpu.WGPUTextureFormat) wgpu.WGPURenderPipeline {
+        // create shader module
+        const shaderSource: [*c]const u8 = @ptrCast(@embedFile("shader"));
+
+        const shaderCodeDesc: wgpu.WGPUShaderModuleWGSLDescriptor = .{
+            .chain = .{
+                .next = null,
+                .sType = wgpu.WGPUSType_ShaderModuleWGSLDescriptor,
+            },
+            .code = shaderSource,
+        };
+
+        const shaderModule: wgpu.WGPUShaderModule = wgpu.wgpuDeviceCreateShaderModule(device, &.{
+            .hintCount = 0,
+            .hints = null,
+            .nextInChain = &shaderCodeDesc.chain,
+        });
+        defer wgpu.wgpuShaderModuleRelease(shaderModule);
+
+        // create render pipeline
+        return wgpu.wgpuDeviceCreateRenderPipeline(device, &wgpu.WGPURenderPipelineDescriptor{
+            .nextInChain = null,
+            .vertex = .{
+                .bufferCount = 0,
+                .buffers = null,
+                .module = shaderModule,
+                .entryPoint = "vs_main",
+                .constantCount = 0,
+                .constants = null,
+            },
+            .primitive = .{
+                .topology = wgpu.WGPUPrimitiveTopology_TriangleList,
+                .stripIndexFormat = wgpu.WGPUIndexFormat_Undefined,
+                .frontFace = wgpu.WGPUFrontFace_CCW,
+                .cullMode = wgpu.WGPUCullMode_None,
+            },
+            .fragment = &wgpu.WGPUFragmentState{
+                .module = shaderModule,
+                .entryPoint = "fs_main",
+                .constantCount = 0,
+                .constants = null,
+                .targetCount = 1,
+                .targets = &wgpu.WGPUColorTargetState{
+                    .format = surfaceFormat,
+                    .blend = &wgpu.WGPUBlendState{
+                        .color = .{
+                            .srcFactor = wgpu.WGPUBlendFactor_SrcAlpha,
+                            .dstFactor = wgpu.WGPUBlendFactor_OneMinusSrcAlpha,
+                            .operation = wgpu.WGPUBlendOperation_Add,
+                        },
+                        .alpha = .{
+                            .srcFactor = wgpu.WGPUBlendFactor_Zero,
+                            .dstFactor = wgpu.WGPUBlendFactor_One,
+                            .operation = wgpu.WGPUBlendOperation_Add,
+                        },
+                    },
+                    .writeMask = wgpu.WGPUColorWriteMask_All,
+                },
+            },
+            .depthStencil = null,
+            .multisample = .{
+                .count = 1,
+                .mask = ~@as(u32, 0),
+                .alphaToCoverageEnabled = 0,
+            },
+            .layout = null,
+        });
+    }
+
+    pub fn deinit(self: *Self) void {
+        wgpu.wgpuRenderPipelineRelease(self.pipeline);
+        wgpu.wgpuSurfaceUnconfigure(self.surface);
+        wgpu.wgpuQueueRelease(self.queue);
+        wgpu.wgpuSurfaceRelease(self.surface);
+        wgpu.wgpuDeviceRelease(self.device);
+        glfw3.glfwDestroyWindow(self.window);
+        glfw3.glfwTerminate();
     }
 
     pub fn isRunning(self: *Self) bool {
@@ -139,7 +292,7 @@ pub const App = struct {
     }
 };
 
-fn requestAdapterSync(instance: wgpu.WGPUInstance, options: *const wgpu.WGPURequestAdapterOptions) ?wgpu.WGPUAdapter {
+fn requestAdapterSync(instance: wgpu.WGPUInstance, options: *const wgpu.WGPURequestAdapterOptions) !?wgpu.WGPUAdapter {
     const UserData = struct {
         adapter: ?wgpu.WGPUAdapter = null,
         requestEnded: bool = false,
@@ -166,7 +319,9 @@ fn requestAdapterSync(instance: wgpu.WGPUInstance, options: *const wgpu.WGPURequ
         @as(?*anyopaque, @ptrCast(&userData)),
     );
 
-    assert(userData.requestEnded);
+    while (!userData.requestEnded) {
+        std.time.sleep(10 * std.time.ns_per_ms);
+    }
 
     return userData.adapter;
 }
