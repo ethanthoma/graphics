@@ -37,6 +37,9 @@ pub const App = struct {
     surface: wgpu.WGPUSurface,
     surfaceFormat: wgpu.WGPUTextureFormat,
     pipeline: wgpu.WGPURenderPipeline,
+    vertexCount: u32,
+    positionBuffer: wgpu.WGPUBuffer,
+    colorBuffer: wgpu.WGPUBuffer,
 
     pub fn init() !Self {
         // Open window
@@ -91,7 +94,7 @@ pub const App = struct {
             .nextInChain = null,
             .label = "My Device",
             .requiredFeatureCount = 0,
-            .requiredLimits = null,
+            .requiredLimits = &getRequiredLimits(adapter),
             .defaultQueue = .{
                 .nextInChain = null,
                 .label = "The default queue",
@@ -126,6 +129,10 @@ pub const App = struct {
         glfw3.glfwShowWindow(window);
 
         const pipeline = initializePipeline(device, preferredFormat);
+        const bufTuple = initBuffer(device, queue);
+        const vertexCount = bufTuple.@"0";
+        const positionBuffer = bufTuple.@"1";
+        const colorBuffer = bufTuple.@"2";
 
         return Self{
             .window = window,
@@ -134,6 +141,9 @@ pub const App = struct {
             .surface = surface,
             .surfaceFormat = preferredFormat,
             .pipeline = pipeline,
+            .vertexCount = vertexCount,
+            .positionBuffer = positionBuffer,
+            .colorBuffer = colorBuffer,
         };
     }
 
@@ -161,7 +171,7 @@ pub const App = struct {
                 .resolveTarget = null,
                 .loadOp = wgpu.WGPULoadOp_Clear,
                 .storeOp = wgpu.WGPUStoreOp_Store,
-                .clearValue = wgpu.WGPUColor{ .r = 0.9, .g = 0.1, .b = 0.2, .a = 1.0 },
+                .clearValue = wgpu.WGPUColor{ .r = 0.05, .g = 0.05, .b = 0.05, .a = 1.0 },
             }},
             .depthStencilAttachment = null,
             .timestampWrites = null,
@@ -169,7 +179,10 @@ pub const App = struct {
 
         wgpu.wgpuRenderPassEncoderSetPipeline(renderPass, self.pipeline);
 
-        wgpu.wgpuRenderPassEncoderDraw(renderPass, 3, 1, 0, 0);
+        wgpu.wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, self.positionBuffer, 0, wgpu.wgpuBufferGetSize(self.positionBuffer));
+        wgpu.wgpuRenderPassEncoderSetVertexBuffer(renderPass, 1, self.colorBuffer, 0, wgpu.wgpuBufferGetSize(self.colorBuffer));
+
+        wgpu.wgpuRenderPassEncoderDraw(renderPass, self.vertexCount, 1, 0, 0);
 
         wgpu.wgpuRenderPassEncoderEnd(renderPass);
         wgpu.wgpuRenderPassEncoderRelease(renderPass);
@@ -231,8 +244,26 @@ pub const App = struct {
         return wgpu.wgpuDeviceCreateRenderPipeline(device, &wgpu.WGPURenderPipelineDescriptor{
             .nextInChain = null,
             .vertex = .{
-                .bufferCount = 0,
-                .buffers = null,
+                .bufferCount = 2,
+                .buffers = &[_]wgpu.WGPUVertexBufferLayout{ .{
+                    .attributeCount = 1,
+                    .attributes = &wgpu.WGPUVertexAttribute{
+                        .shaderLocation = 0,
+                        .format = wgpu.WGPUVertexFormat_Float32x2,
+                        .offset = 0,
+                    },
+                    .arrayStride = 2 * @sizeOf(f32),
+                    .stepMode = wgpu.WGPUVertexStepMode_Vertex,
+                }, .{
+                    .attributeCount = 1,
+                    .attributes = &wgpu.WGPUVertexAttribute{
+                        .shaderLocation = 1,
+                        .format = wgpu.WGPUVertexFormat_Float32x3,
+                        .offset = 0,
+                    },
+                    .arrayStride = 3 * @sizeOf(f32),
+                    .stepMode = wgpu.WGPUVertexStepMode_Vertex,
+                } },
                 .module = shaderModule,
                 .entryPoint = "vs_main",
                 .constantCount = 0,
@@ -277,7 +308,58 @@ pub const App = struct {
         });
     }
 
+    fn initBuffer(device: wgpu.WGPUDevice, queue: wgpu.WGPUQueue) struct { u32, wgpu.WGPUBuffer, wgpu.WGPUBuffer } {
+        const positionData = [_]f32{ -0.5, -0.5, 0.5, -0.5, 0.0, 0.5 };
+
+        const vertexCount: u32 = @intCast(positionData.len / 2);
+
+        const colorData = [_]f32{ 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };
+
+        const positionBuffer: wgpu.WGPUBuffer = wgpu.wgpuDeviceCreateBuffer(device, &wgpu.WGPUBufferDescriptor{
+            .nextInChain = null,
+            .label = "position buffer",
+            .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Vertex,
+            .size = positionData.len * @sizeOf(f32),
+            .mappedAtCreation = 0, //false
+        });
+        wgpu.wgpuQueueWriteBuffer(queue, positionBuffer, 0, &positionData, positionData.len * @sizeOf(f32));
+
+        const colorBuffer: wgpu.WGPUBuffer = wgpu.wgpuDeviceCreateBuffer(device, &wgpu.WGPUBufferDescriptor{
+            .nextInChain = null,
+            .label = "position buffer",
+            .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Vertex,
+            .size = colorData.len * @sizeOf(f32),
+            .mappedAtCreation = 0, //false
+        });
+        wgpu.wgpuQueueWriteBuffer(queue, colorBuffer, 0, &colorData, colorData.len * @sizeOf(f32));
+
+        return .{ vertexCount, positionBuffer, colorBuffer };
+    }
+
+    fn getRequiredLimits(adapter: wgpu.WGPUAdapter) wgpu.WGPURequiredLimits {
+        var supportedLimits: wgpu.WGPUSupportedLimits = .{
+            .nextInChain = null,
+        };
+        _ = wgpu.wgpuAdapterGetLimits(adapter, &supportedLimits);
+
+        var requiredLimits: wgpu.WGPURequiredLimits = .{};
+        setDefault(&requiredLimits.limits);
+
+        requiredLimits.limits.maxVertexAttributes = 2;
+        requiredLimits.limits.maxVertexBuffers = 2;
+        requiredLimits.limits.maxBufferSize = 6 * 3 * @sizeOf(f32);
+        requiredLimits.limits.maxVertexBufferArrayStride = 3 * @sizeOf(f32);
+        requiredLimits.limits.maxInterStageShaderComponents = 3;
+
+        requiredLimits.limits.minUniformBufferOffsetAlignment = supportedLimits.limits.minUniformBufferOffsetAlignment;
+        requiredLimits.limits.minStorageBufferOffsetAlignment = supportedLimits.limits.minStorageBufferOffsetAlignment;
+
+        return requiredLimits;
+    }
+
     pub fn deinit(self: *Self) void {
+        wgpu.wgpuBufferRelease(self.positionBuffer);
+        wgpu.wgpuBufferRelease(self.colorBuffer);
         wgpu.wgpuRenderPipelineRelease(self.pipeline);
         wgpu.wgpuSurfaceUnconfigure(self.surface);
         wgpu.wgpuQueueRelease(self.queue);
@@ -291,6 +373,41 @@ pub const App = struct {
         return glfw3.glfwWindowShouldClose(self.window) == glfw3.GL_FALSE;
     }
 };
+
+fn setDefault(limits: *wgpu.WGPULimits) void {
+    limits.maxTextureDimension1D = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxTextureDimension2D = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxTextureDimension3D = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxTextureArrayLayers = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxBindGroups = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxBindGroupsPlusVertexBuffers = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxBindingsPerBindGroup = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxDynamicUniformBuffersPerPipelineLayout = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxDynamicStorageBuffersPerPipelineLayout = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxSampledTexturesPerShaderStage = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxSamplersPerShaderStage = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxStorageBuffersPerShaderStage = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxStorageTexturesPerShaderStage = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxUniformBuffersPerShaderStage = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxUniformBufferBindingSize = wgpu.WGPU_LIMIT_U64_UNDEFINED;
+    limits.maxStorageBufferBindingSize = wgpu.WGPU_LIMIT_U64_UNDEFINED;
+    limits.minUniformBufferOffsetAlignment = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.minStorageBufferOffsetAlignment = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxVertexBuffers = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxBufferSize = wgpu.WGPU_LIMIT_U64_UNDEFINED;
+    limits.maxVertexAttributes = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxVertexBufferArrayStride = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxInterStageShaderComponents = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxInterStageShaderVariables = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxColorAttachments = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxColorAttachmentBytesPerSample = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupStorageSize = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeInvocationsPerWorkgroup = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupSizeX = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupSizeY = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupSizeZ = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+    limits.maxComputeWorkgroupsPerDimension = wgpu.WGPU_LIMIT_U32_UNDEFINED;
+}
 
 fn requestAdapterSync(instance: wgpu.WGPUInstance, options: *const wgpu.WGPURequestAdapterOptions) !?wgpu.WGPUAdapter {
     const UserData = struct {
