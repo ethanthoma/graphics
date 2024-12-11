@@ -11,9 +11,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    exe.root_module.addImport("mach-glfw", b.dependency("mach_glfw", .{
+        .target = target,
+        .optimize = optimize,
+    }).module("mach-glfw"));
+
     addWgpuNative(b, exe);
-    addGlfw3(b, exe);
-    addGLFWWebGPU(b, exe);
     addShader(b, exe);
 
     b.installArtifact(exe);
@@ -40,24 +43,12 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_unit_tests.step);
 }
 
-fn addGlfw3(b: *std.Build, exe: *std.Build.Step.Compile) void {
-    exe.linkLibC();
-    exe.addIncludePath(b.path("glfw3"));
-    exe.addObjectFile(b.path("glfw3/libglfw3.a"));
-    exe.addIncludePath(.{ .cwd_relative = "@libGL@" });
-    exe.addIncludePath(.{ .cwd_relative = "@libwayland@" });
-}
-
 fn addWgpuNative(b: *std.Build, exe: *std.Build.Step.Compile) void {
     exe.linkLibC();
     exe.linkLibCpp();
-    exe.addIncludePath(b.path("wgpu_native"));
-    exe.addObjectFile(b.path("wgpu_native/libwgpu_native.a"));
+    exe.addIncludePath(b.path("include/wgpu-native-v22.1.0.5"));
+    exe.addObjectFile(b.path("include/wgpu-native-v22.1.0.5/libwgpu_native.a"));
     exe.linkSystemLibrary("gcc_s");
-}
-
-fn addGLFWWebGPU(b: *std.Build, exe: *std.Build.Step.Compile) void {
-    exe.addIncludePath(b.path("include/glfw3webgpu-v1.2.0"));
 }
 
 fn addShader(b: *std.Build, exe: *std.Build.Step.Compile) void {

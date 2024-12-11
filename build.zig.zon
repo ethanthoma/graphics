@@ -7,6 +7,10 @@
         .wgpu_native = .{
             .path = "wgpu_native",
         },
+        .mach_glfw = .{
+            .url = "https://pkg.machengine.org/mach-glfw/daeb7b10187249aade7d92ccfef8dcf5a94f8148.tar.gz",
+            .hash = "12207f4bba892c44b3b1b92b13b7ce5df2b49da1e797ba3e02b38b08d1e78c5cec0d",
+        },
     },
 
     .paths = .{

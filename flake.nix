@@ -34,9 +34,6 @@
             let
               pkgs = env.pkgsForTarget target;
 
-              waylandSupport = true;
-              x11Support = false;
-
               wgpu-native = pkgs.rustPlatform.buildRustPackage rec {
                 pname = "wgpu-native";
                 version = "22.1.0.5";
@@ -67,72 +64,20 @@
 
                 LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
               };
-
-              glfw3 =
-                let
-                  waylandCmakeFlag =
-                    if waylandSupport then [ "-DGLFW_BUILD_WAYLAND=ON" ] else [ "-DGLFW_BUILD_WAYLAND=OFF" ];
-                  x11CmakeFlag = if x11Support then [ "-DGLFW_BUILD_X11=ON" ] else [ "-DGLFW_BUILD_X11=OFF" ];
-                in
-                pkgs.stdenv.mkDerivation rec {
-                  name = "glfw3";
-                  version = "3.4";
-
-                  cmakeFlags = [
-                    waylandCmakeFlag
-                    x11CmakeFlag
-                    "-DCMAKE_CXX_FLAGS=-I${pkgs.libGL.dev}/include"
-                    "-DCMAKE_LD_FLAGS=-L${pkgs.libGL.out}/lib"
-                  ];
-
-                  buildInputs =
-                    [ ]
-                    ++ pkgs.lib.optionals waylandSupport (
-                      with pkgs;
-                      [
-                        wayland
-                        libxkbcommon
-                        libffi
-                        wayland-scanner
-                        wayland-protocols
-                      ]
-                    );
-
-                  nativeBuildInputs = with pkgs; [
-                    pkg-config
-                    cmake
-                  ];
-
-                  src = pkgs.fetchFromGitHub {
-                    owner = name;
-                    repo = name;
-                    rev = version;
-                    hash = "sha256-FcnQPDeNHgov1Z07gjFze0VMz2diOrpbKZCsI96ngz0=";
-                  };
-                };
             in
             {
               src = cleanSource ./.;
 
               buildInputs = with pkgs; [ wayland.dev ];
 
-              prePatch = ''
-                substituteInPlace /build/source/build.zig \
-                --replace-fail '@libGL@' "${pkgs.libGL.dev}/include" \
-                --replace-fail '@libwayland@' "${pkgs.wayland.dev}/include"
-              '';
-
-              # this should be improved
               preBuild = ''
-                mkdir -p /build/source/wgpu_native
-                cp ${wgpu-native.out}/lib/* /build/source/wgpu_native
-
-                mkdir -p /build/source/glfw3
-                cp ${glfw3}/lib/libglfw3.a /build/source/glfw3
-                cp ${glfw3}/include/GLFW/* /build/source/glfw3
-
-                ls /build/source
+                mkdir -p /build/source/include/wgpu-native-v${wgpu-native.version}
+                cp ${wgpu-native.out}/lib/* /build/source/include/wgpu-native-v${wgpu-native.version}
               '';
+
+              passthru = {
+                inherit wgpu-native;
+              };
 
               zigPreferMusl = true;
               zigDisableWrap = true;
@@ -163,7 +108,17 @@
         apps.bundle.default = apps.bundle.target.${system-triple};
 
         # nix develop
-        devShells.default = env.mkShell { };
+        devShells.default =
+          let
+            pkg = packages.target.${system-triple};
+            inherit (pkg) wgpu-native;
+
+          in
+          env.mkShell {
+            shellHook = ''
+              ln -s ${wgpu-native.out}/lib include/wgpu-native-v${wgpu-native.version}
+            '';
+          };
       }
     ));
 }

@@ -1,13 +1,16 @@
-# zig
-.zig-cache/
-zig-cache/
-zig-out/
-/release/
-/debug/
-/build/
-/build-*/
-/docgen_tmp/
+*
+
+!.gitattributes
+!.gitignore
+!README.md
 
 # nix
-result
-.direnv
+!flake.lock
+!flake.nix
+
+# zig
+!src/
+!src/*
+!build.zig
+!build.zig.zon
+!build.zig.zon2json-lock

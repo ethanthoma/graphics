@@ -1,18 +1,10 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const glfw3 = @cImport({
-    @cInclude("glfw3.h");
-    @cDefine("GLFW_EXPOSE_NATIVE_WAYLAND", {});
-    @cInclude("glfw3native.h");
-});
+const glfw = @import("mach-glfw");
 
 const wgpu = @cImport({
     @cInclude("wgpu.h");
-});
-
-const glfw3_wgpu = @cImport({
-    @cInclude("glfw3webgpu.h");
 });
 
 const Error = error{
@@ -28,10 +20,42 @@ const Error = error{
     FailedToGetCurrentTexture,
 };
 
+fn errorCallback(error_code: glfw.ErrorCode, description: [:0]const u8) void {
+    std.log.err("glfw: {}: {s}\n", .{ error_code, description });
+}
+
+const mesh = struct {
+    const Vertex = extern struct {
+        position: Position,
+        color: Color,
+
+        const Position = [2]f32;
+        const Color = [3]f32;
+    };
+
+    const vertices = [_]Vertex{
+        .{ .position = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
+        .{ .position = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
+        .{ .position = .{ 0.0, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
+    };
+
+    const positions = blk: {
+        var pos: [vertices.len]Vertex.Position = undefined;
+        for (vertices, 0..) |v, i| pos[i] = v.position;
+        break :blk pos;
+    };
+
+    const colors = blk: {
+        var col: [vertices.len]Vertex.Color = undefined;
+        for (vertices, 0..) |v, i| col[i] = v.color;
+        break :blk col;
+    };
+};
+
 pub const App = struct {
     const Self = @This();
 
-    window: *glfw3.GLFWwindow,
+    window: glfw.Window,
     device: wgpu.WGPUDevice,
     queue: wgpu.WGPUQueue,
     surface: wgpu.WGPUSurface,
@@ -42,24 +66,26 @@ pub const App = struct {
     colorBuffer: wgpu.WGPUBuffer,
 
     pub fn init() !Self {
+        glfw.setErrorCallback(errorCallback);
         // Open window
-        const retval = glfw3.glfwInit();
-        if (retval == glfw3.GL_FALSE) {
+        if (!glfw.init(.{})) {
             std.debug.print("Failed to initialize GLFW\n", .{});
-            return Error.FailedToInitializeGLFW;
         }
-        errdefer glfw3.glfwTerminate();
-
-        // Set window hints BEFORE window creation
-        glfw3.glfwWindowHint(glfw3.GLFW_CLIENT_API, glfw3.GLFW_NO_API);
-        glfw3.glfwWindowHint(glfw3.GLFW_RESIZABLE, glfw3.GLFW_FALSE);
+        errdefer glfw.terminate();
 
         std.debug.print("Opening window\n", .{});
-        const window: *glfw3.GLFWwindow = glfw3.glfwCreateWindow(640, 480, "VOXEL", null, null) orelse {
+        const window: glfw.Window = glfw.Window.create(640, 480, "VOXEL", null, null, .{
+            .resizable = false,
+            .client_api = .no_api,
+        }) orelse {
             std.debug.print("Failed to open window\n", .{});
             return Error.FailedToOpenWindow;
         };
-        errdefer glfw3.glfwDestroyWindow(window);
+        errdefer glfw.Window.destroy(window);
+
+        const size = window.getFramebufferSize();
+
+        std.debug.print("{}\n", .{window.getAttrib(.resizable)});
 
         // Create instance
         std.debug.print("Creating instance\n", .{});
@@ -115,8 +141,8 @@ pub const App = struct {
 
         wgpu.wgpuSurfaceConfigure(surface, &.{
             .nextInChain = null,
-            .width = 640,
-            .height = 480,
+            .width = size.width,
+            .height = size.height,
             .usage = wgpu.WGPUTextureUsage_RenderAttachment,
             .format = preferredFormat,
             .viewFormatCount = 0,
@@ -125,8 +151,6 @@ pub const App = struct {
             .presentMode = wgpu.WGPUPresentMode_Fifo,
             .alphaMode = wgpu.WGPUCompositeAlphaMode_Auto,
         });
-
-        glfw3.glfwShowWindow(window);
 
         const pipeline = initializePipeline(device, preferredFormat);
         const bufTuple = initBuffer(device, queue);
@@ -148,7 +172,7 @@ pub const App = struct {
     }
 
     pub fn run(self: *Self) void {
-        glfw3.glfwPollEvents();
+        glfw.pollEvents();
         defer _ = wgpu.wgpuDevicePoll(self.device, 0, null);
 
         // setup target view
@@ -309,29 +333,25 @@ pub const App = struct {
     }
 
     fn initBuffer(device: wgpu.WGPUDevice, queue: wgpu.WGPUQueue) struct { u32, wgpu.WGPUBuffer, wgpu.WGPUBuffer } {
-        const positionData = [_]f32{ -0.5, -0.5, 0.5, -0.5, 0.0, 0.5 };
-
-        const vertexCount: u32 = @intCast(positionData.len / 2);
-
-        const colorData = [_]f32{ 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };
+        const vertexCount: u32 = @intCast(mesh.vertices.len);
 
         const positionBuffer: wgpu.WGPUBuffer = wgpu.wgpuDeviceCreateBuffer(device, &wgpu.WGPUBufferDescriptor{
             .nextInChain = null,
             .label = "position buffer",
             .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Vertex,
-            .size = positionData.len * @sizeOf(f32),
+            .size = mesh.vertices.len * @sizeOf(mesh.Vertex.Position),
             .mappedAtCreation = 0, //false
         });
-        wgpu.wgpuQueueWriteBuffer(queue, positionBuffer, 0, &positionData, positionData.len * @sizeOf(f32));
+        wgpu.wgpuQueueWriteBuffer(queue, positionBuffer, 0, &mesh.positions, mesh.vertices.len * @sizeOf(mesh.Vertex.Position));
 
         const colorBuffer: wgpu.WGPUBuffer = wgpu.wgpuDeviceCreateBuffer(device, &wgpu.WGPUBufferDescriptor{
             .nextInChain = null,
             .label = "position buffer",
             .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Vertex,
-            .size = colorData.len * @sizeOf(f32),
+            .size = mesh.vertices.len * @sizeOf(mesh.Vertex.Color),
             .mappedAtCreation = 0, //false
         });
-        wgpu.wgpuQueueWriteBuffer(queue, colorBuffer, 0, &colorData, colorData.len * @sizeOf(f32));
+        wgpu.wgpuQueueWriteBuffer(queue, colorBuffer, 0, &mesh.colors, mesh.vertices.len * @sizeOf(mesh.Vertex.Color));
 
         return .{ vertexCount, positionBuffer, colorBuffer };
     }
@@ -365,12 +385,12 @@ pub const App = struct {
         wgpu.wgpuQueueRelease(self.queue);
         wgpu.wgpuSurfaceRelease(self.surface);
         wgpu.wgpuDeviceRelease(self.device);
-        glfw3.glfwDestroyWindow(self.window);
-        glfw3.glfwTerminate();
+        glfw.Window.destroy(self.window);
+        glfw.terminate();
     }
 
     pub fn isRunning(self: *Self) bool {
-        return glfw3.glfwWindowShouldClose(self.window) == glfw3.GL_FALSE;
+        return !glfw.Window.shouldClose(self.window);
     }
 };
 
@@ -476,27 +496,18 @@ fn requestDeviceSync(adapter: wgpu.WGPUAdapter, descriptor: *const wgpu.WGPUDevi
 }
 
 // wayland only
-fn glfwGetWGPUSurface(instance: wgpu.WGPUInstance, window: *glfw3.GLFWwindow) !wgpu.WGPUSurface {
-    const wayland_display: *glfw3.wl_display = glfw3.glfwGetWaylandDisplay() orelse {
-        return Error.FailedToGetWaylandDisplay;
-    };
-    const wayland_surface: *glfw3.wl_surface = glfw3.glfwGetWaylandWindow(window) orelse {
-        return Error.FailedToGetWaylandWindow;
-    };
+fn glfwGetWGPUSurface(instance: wgpu.WGPUInstance, window: glfw.Window) !wgpu.WGPUSurface {
+    const Native = glfw.Native(.{ .wayland = true });
 
-    const fromWaylandSurface = wgpu.WGPUSurfaceDescriptorFromWaylandSurface{
-        .chain = .{
-            .next = null,
-            .sType = wgpu.WGPUSType_SurfaceDescriptorFromWaylandSurface,
-        },
-        .display = wayland_display,
-        .surface = wayland_surface,
-    };
-
-    const surfaceDescriptor = wgpu.WGPUSurfaceDescriptor{
-        .nextInChain = &fromWaylandSurface.chain,
+    return wgpu.wgpuInstanceCreateSurface(instance, &wgpu.WGPUSurfaceDescriptor{
+        .nextInChain = &(wgpu.WGPUSurfaceDescriptorFromWaylandSurface{
+            .chain = .{
+                .next = null,
+                .sType = wgpu.WGPUSType_SurfaceDescriptorFromWaylandSurface,
+            },
+            .display = Native.getWaylandDisplay(),
+            .surface = Native.getWaylandWindow(window),
+        }).chain,
         .label = null,
-    };
-
-    return wgpu.wgpuInstanceCreateSurface(instance, &surfaceDescriptor);
+    });
 }
