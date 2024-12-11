@@ -25,7 +25,7 @@ fn errorCallback(error_code: glfw.ErrorCode, description: [:0]const u8) void {
 }
 
 const mesh = struct {
-    const Vertex = extern struct {
+    const Point = extern struct {
         position: Position,
         color: Color,
 
@@ -33,21 +33,29 @@ const mesh = struct {
         const Color = [3]f32;
     };
 
-    const vertices = [_]Vertex{
+    const Index = [3]u16;
+
+    const points = [_]Point{
         .{ .position = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
         .{ .position = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
-        .{ .position = .{ 0.0, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
+        .{ .position = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
+        .{ .position = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 } },
+    };
+
+    const indices = [_]Index{
+        .{ 0, 1, 2 },
+        .{ 0, 2, 3 },
     };
 
     const positions = blk: {
-        var pos: [vertices.len]Vertex.Position = undefined;
-        for (vertices, 0..) |v, i| pos[i] = v.position;
+        var pos: [points.len]Point.Position = undefined;
+        for (points, 0..) |p, i| pos[i] = p.position;
         break :blk pos;
     };
 
     const colors = blk: {
-        var col: [vertices.len]Vertex.Color = undefined;
-        for (vertices, 0..) |v, i| col[i] = v.color;
+        var col: [points.len]Point.Color = undefined;
+        for (points, 0..) |p, i| col[i] = p.color;
         break :blk col;
     };
 };
@@ -61,9 +69,9 @@ pub const App = struct {
     surface: wgpu.WGPUSurface,
     surfaceFormat: wgpu.WGPUTextureFormat,
     pipeline: wgpu.WGPURenderPipeline,
-    vertexCount: u32,
-    positionBuffer: wgpu.WGPUBuffer,
-    colorBuffer: wgpu.WGPUBuffer,
+    indexCount: u32 = mesh.indices.len * @typeInfo(mesh.Index).array.len,
+    indexBuffer: wgpu.WGPUBuffer,
+    pointBuffer: wgpu.WGPUBuffer,
 
     pub fn init() !Self {
         glfw.setErrorCallback(errorCallback);
@@ -154,9 +162,8 @@ pub const App = struct {
 
         const pipeline = initializePipeline(device, preferredFormat);
         const bufTuple = initBuffer(device, queue);
-        const vertexCount = bufTuple.@"0";
-        const positionBuffer = bufTuple.@"1";
-        const colorBuffer = bufTuple.@"2";
+        const pointBuffer = bufTuple.@"0";
+        const indexBuffer = bufTuple.@"1";
 
         return Self{
             .window = window,
@@ -165,9 +172,8 @@ pub const App = struct {
             .surface = surface,
             .surfaceFormat = preferredFormat,
             .pipeline = pipeline,
-            .vertexCount = vertexCount,
-            .positionBuffer = positionBuffer,
-            .colorBuffer = colorBuffer,
+            .indexBuffer = indexBuffer,
+            .pointBuffer = pointBuffer,
         };
     }
 
@@ -203,10 +209,10 @@ pub const App = struct {
 
         wgpu.wgpuRenderPassEncoderSetPipeline(renderPass, self.pipeline);
 
-        wgpu.wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, self.positionBuffer, 0, wgpu.wgpuBufferGetSize(self.positionBuffer));
-        wgpu.wgpuRenderPassEncoderSetVertexBuffer(renderPass, 1, self.colorBuffer, 0, wgpu.wgpuBufferGetSize(self.colorBuffer));
+        wgpu.wgpuRenderPassEncoderSetVertexBuffer(renderPass, 0, self.pointBuffer, 0, wgpu.wgpuBufferGetSize(self.pointBuffer));
+        wgpu.wgpuRenderPassEncoderSetIndexBuffer(renderPass, self.indexBuffer, wgpu.WGPUIndexFormat_Uint16, 0, wgpu.wgpuBufferGetSize(self.indexBuffer));
 
-        wgpu.wgpuRenderPassEncoderDraw(renderPass, self.vertexCount, 1, 0, 0);
+        wgpu.wgpuRenderPassEncoderDrawIndexed(renderPass, self.indexCount, 1, 0, 0, 0);
 
         wgpu.wgpuRenderPassEncoderEnd(renderPass);
         wgpu.wgpuRenderPassEncoderRelease(renderPass);
@@ -268,26 +274,23 @@ pub const App = struct {
         return wgpu.wgpuDeviceCreateRenderPipeline(device, &wgpu.WGPURenderPipelineDescriptor{
             .nextInChain = null,
             .vertex = .{
-                .bufferCount = 2,
-                .buffers = &[_]wgpu.WGPUVertexBufferLayout{ .{
-                    .attributeCount = 1,
-                    .attributes = &wgpu.WGPUVertexAttribute{
-                        .shaderLocation = 0,
-                        .format = wgpu.WGPUVertexFormat_Float32x2,
-                        .offset = 0,
+                .bufferCount = 1,
+                .buffers = &[_]wgpu.WGPUVertexBufferLayout{
+                    .{
+                        .attributeCount = 2,
+                        .attributes = &[_]wgpu.WGPUVertexAttribute{ .{
+                            .shaderLocation = 0,
+                            .format = wgpu.WGPUVertexFormat_Float32x2,
+                            .offset = 0,
+                        }, .{
+                            .shaderLocation = 1,
+                            .format = wgpu.WGPUVertexFormat_Float32x3,
+                            .offset = 2 * @sizeOf(f32),
+                        } },
+                        .arrayStride = 5 * @sizeOf(f32),
+                        .stepMode = wgpu.WGPUVertexStepMode_Vertex,
                     },
-                    .arrayStride = 2 * @sizeOf(f32),
-                    .stepMode = wgpu.WGPUVertexStepMode_Vertex,
-                }, .{
-                    .attributeCount = 1,
-                    .attributes = &wgpu.WGPUVertexAttribute{
-                        .shaderLocation = 1,
-                        .format = wgpu.WGPUVertexFormat_Float32x3,
-                        .offset = 0,
-                    },
-                    .arrayStride = 3 * @sizeOf(f32),
-                    .stepMode = wgpu.WGPUVertexStepMode_Vertex,
-                } },
+                },
                 .module = shaderModule,
                 .entryPoint = "vs_main",
                 .constantCount = 0,
@@ -332,28 +335,28 @@ pub const App = struct {
         });
     }
 
-    fn initBuffer(device: wgpu.WGPUDevice, queue: wgpu.WGPUQueue) struct { u32, wgpu.WGPUBuffer, wgpu.WGPUBuffer } {
-        const vertexCount: u32 = @intCast(mesh.vertices.len);
-
-        const positionBuffer: wgpu.WGPUBuffer = wgpu.wgpuDeviceCreateBuffer(device, &wgpu.WGPUBufferDescriptor{
+    fn initBuffer(device: wgpu.WGPUDevice, queue: wgpu.WGPUQueue) struct { wgpu.WGPUBuffer, wgpu.WGPUBuffer } {
+        const pointBuffer: wgpu.WGPUBuffer = wgpu.wgpuDeviceCreateBuffer(device, &wgpu.WGPUBufferDescriptor{
             .nextInChain = null,
-            .label = "position buffer",
+            .label = "point buffer",
             .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Vertex,
-            .size = mesh.vertices.len * @sizeOf(mesh.Vertex.Position),
+            .size = mesh.points.len * @sizeOf(mesh.Point),
             .mappedAtCreation = 0, //false
         });
-        wgpu.wgpuQueueWriteBuffer(queue, positionBuffer, 0, &mesh.positions, mesh.vertices.len * @sizeOf(mesh.Vertex.Position));
+        wgpu.wgpuQueueWriteBuffer(queue, pointBuffer, 0, &mesh.points, mesh.points.len * @sizeOf(mesh.Point));
 
-        const colorBuffer: wgpu.WGPUBuffer = wgpu.wgpuDeviceCreateBuffer(device, &wgpu.WGPUBufferDescriptor{
+        const indexBuffer: wgpu.WGPUBuffer = wgpu.wgpuDeviceCreateBuffer(device, &wgpu.WGPUBufferDescriptor{
             .nextInChain = null,
-            .label = "position buffer",
-            .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Vertex,
-            .size = mesh.vertices.len * @sizeOf(mesh.Vertex.Color),
+            .label = "index buffer",
+            .usage = wgpu.WGPUBufferUsage_CopyDst | wgpu.WGPUBufferUsage_Index,
+            .size = mesh.indices.len * @sizeOf(mesh.Index),
             .mappedAtCreation = 0, //false
         });
-        wgpu.wgpuQueueWriteBuffer(queue, colorBuffer, 0, &mesh.colors, mesh.vertices.len * @sizeOf(mesh.Vertex.Color));
+        wgpu.wgpuQueueWriteBuffer(queue, indexBuffer, 0, &mesh.indices, mesh.indices.len * @sizeOf(mesh.Index));
 
-        return .{ vertexCount, positionBuffer, colorBuffer };
+        //std.debug.print("{}, {}\n", .{ mesh.indices.len * @sizeOf(mesh.Index), (mesh.indices.len * @sizeOf(mesh.Index) + 3) & ~@as(usize, 3) });
+
+        return .{ pointBuffer, indexBuffer };
     }
 
     fn getRequiredLimits(adapter: wgpu.WGPUAdapter) wgpu.WGPURequiredLimits {
@@ -366,9 +369,9 @@ pub const App = struct {
         setDefault(&requiredLimits.limits);
 
         requiredLimits.limits.maxVertexAttributes = 2;
-        requiredLimits.limits.maxVertexBuffers = 2;
-        requiredLimits.limits.maxBufferSize = 6 * 3 * @sizeOf(f32);
-        requiredLimits.limits.maxVertexBufferArrayStride = 3 * @sizeOf(f32);
+        requiredLimits.limits.maxVertexBuffers = 1;
+        requiredLimits.limits.maxBufferSize = @typeInfo(mesh.Index).array.len * mesh.indices.len * @sizeOf(mesh.Point);
+        requiredLimits.limits.maxVertexBufferArrayStride = @sizeOf(mesh.Point);
         requiredLimits.limits.maxInterStageShaderComponents = 3;
 
         requiredLimits.limits.minUniformBufferOffsetAlignment = supportedLimits.limits.minUniformBufferOffsetAlignment;
@@ -378,8 +381,8 @@ pub const App = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        wgpu.wgpuBufferRelease(self.positionBuffer);
-        wgpu.wgpuBufferRelease(self.colorBuffer);
+        wgpu.wgpuBufferRelease(self.indexBuffer);
+        wgpu.wgpuBufferRelease(self.pointBuffer);
         wgpu.wgpuRenderPipelineRelease(self.pipeline);
         wgpu.wgpuSurfaceUnconfigure(self.surface);
         wgpu.wgpuQueueRelease(self.queue);
