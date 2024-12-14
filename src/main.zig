@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 
 const App = @import("app.zig").App;
 

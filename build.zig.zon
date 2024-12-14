@@ -4,12 +4,13 @@
     .version = "0.0.0",
 
     .dependencies = .{
-        .wgpu_native = .{
-            .path = "wgpu_native",
-        },
         .mach_glfw = .{
             .url = "https://pkg.machengine.org/mach-glfw/daeb7b10187249aade7d92ccfef8dcf5a94f8148.tar.gz",
             .hash = "12207f4bba892c44b3b1b92b13b7ce5df2b49da1e797ba3e02b38b08d1e78c5cec0d",
+        },
+        .wgpu_native_zig = .{
+            .url = "https://github.com/ethanthoma/wgpu-native-zig/archive/f659b3febb29f288d7b72aac71aaccb29387006f.tar.gz",
+            .hash = "12205937fdcdbc271ed94526e7e9731293c8982b73c5be1c0733c37124d5775c98eb",
         },
     },
 
@@ -17,6 +18,5 @@
         "build.zig",
         "build.zig.zon",
         "src",
-        "wgpu-native",
     },
 }
