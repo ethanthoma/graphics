@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const App = @import("app.zig").App;
+const App = @import("App.zig");
 
 pub fn main() !void {
     var app = try App.init();
