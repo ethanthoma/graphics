@@ -35,24 +35,29 @@ surface: *gpu.Surface,
 surface_format: gpu.TextureFormat,
 renderer: ?Renderer,
 
+width: u32 = 640,
+height: u32 = 480,
+
 resize_context: struct {
     device: *gpu.Device,
     surface: *gpu.Surface,
     surface_format: gpu.TextureFormat,
 },
 
-pub fn init(allocator: std.mem.Allocator) !App {
+pub fn init(allocator: std.mem.Allocator) !*App {
     var app = try allocator.create(App);
 
     app.self = app;
     app.allocator = allocator;
     app.renderer = null;
+    app.width = 640;
+    app.height = 480;
 
     try initWindowAndDevice(app);
     std.debug.print("setup renderer...", .{});
-    app.renderer = Renderer.init(app.device, app.queue, app.surface_format);
+    app.renderer = Renderer.init(app.device, app.queue, app.surface_format, app.width, app.height);
 
-    return app.*;
+    return app;
 }
 
 fn initWindowAndDevice(app: *App) !void {
@@ -71,7 +76,7 @@ fn initWindowAndDevice(app: *App) !void {
     defer instance.release();
 
     // Open window
-    app.window = glfw.Window.create(640, 480, "VOXEL", null, null, .{
+    app.window = glfw.Window.create(app.width, app.height, "VOXEL", null, null, .{
         .resizable = false,
         .client_api = .no_api,
     }) orelse {
@@ -170,7 +175,7 @@ fn getRequiredLimits(adapter: *gpu.Adapter) gpu.RequiredLimits {
     required_limits.limits.max_inter_stage_shader_components = 3;
 
     required_limits.limits.max_buffer_size = 15 * 5 * @sizeOf(f32);
-    required_limits.limits.max_vertex_buffer_array_stride = 5 * @sizeOf(f32);
+    required_limits.limits.max_vertex_buffer_array_stride = 6 * @sizeOf(f32);
 
     required_limits.limits.max_bind_groups = 1;
     required_limits.limits.max_uniform_buffers_per_shader_stage = 1;
@@ -196,7 +201,10 @@ fn glfwGetWGPUSurface(instance: *gpu.Instance, window: glfw.Window) !?*gpu.Surfa
 }
 
 fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
-    const app = window.getUserPointer(App) orelse return;
+    const app: *App = window.getUserPointer(App) orelse return;
+
+    app.width = width;
+    app.height = height;
 
     std.debug.print("resized {}, {}\n", .{ width, height });
 
@@ -207,5 +215,5 @@ fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
         .height = height,
     });
 
-    if (app.renderer) |renderer| renderer.updateScale(app.queue, width, height);
+    if (app.renderer) |*renderer| renderer.updateScale(app.queue, width, height);
 }

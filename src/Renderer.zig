@@ -17,24 +17,47 @@ point_buffer: *gpu.Buffer,
 uniform_buffer: *gpu.Buffer,
 bind_group: *gpu.BindGroup,
 
+width: u32,
+height: u32,
+
 var mesh = Mesh{
     .points = ([_]Mesh.Point{
-        .{ .position = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
-        .{ .position = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
-        .{ .position = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
-        .{ .position = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 } },
+        // front
+        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 0
+        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 1
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 2
+        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 3
+
+        // back
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 4
+        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 5
+        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 6
+        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 7
     })[0..],
 
     .indices = ([_]Mesh.Index{
-        .{ 0, 1, 2 },
-        .{ 0, 2, 3 },
+        // front
+        .{ 0, 1, 2 }, .{ 0, 2, 3 },
+        // back
+        .{ 5, 4, 7 }, .{ 5, 7, 6 },
+        // top
+        .{ 3, 2, 6 }, .{ 3, 6, 7 },
+        // bottom
+        .{ 4, 5, 1 }, .{ 4, 1, 0 },
+        // right
+        .{ 1, 5, 6 }, .{ 1, 6, 2 },
+        // left
+        .{ 4, 0, 3 }, .{ 4, 3, 7 },
     })[0..],
 
     .uniform = .{},
 };
 
-pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureFormat) Renderer {
+pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureFormat, width: u32, height: u32) Renderer {
     var renderer: Renderer = undefined;
+
+    renderer.width = width;
+    renderer.height = height;
 
     const shader_module = device.createShaderModule(&gpu.shaderModuleWGSLDescriptor(.{
         .code = @embedFile("./shader.wgsl"),
@@ -65,7 +88,6 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
 
         var _attributes: [fields.len]gpu.VertexAttribute = undefined;
 
-        var offset = 0;
         for (fields, 0..) |field, i| {
             const field_type = @typeInfo(field.type);
 
@@ -78,12 +100,9 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
                     },
                     else => @compileError("unsupported type for vertex data"),
                 },
-                .offset = offset,
+                .offset = @offsetOf(Mesh.Point, field.name),
                 .shader_location = i,
             };
-
-            // TODO: use @offsetOf
-            offset += @sizeOf(field.type);
         }
 
         break :retval _attributes;
@@ -126,7 +145,16 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
                 .attributes = attributes,
             }},
         },
-        .primitive = gpu.PrimitiveState{},
+        .primitive = gpu.PrimitiveState{
+            .cull_mode = .back,
+        },
+        .depth_stencil = &.{
+            .format = .depth24_plus,
+            .depth_write_enabled = @intFromBool(true),
+            .depth_compare = .less,
+            .stencil_front = .{},
+            .stencil_back = .{},
+        },
         .fragment = &gpu.FragmentState{
             .module = shader_module,
             .entry_point = "fs_main",
@@ -221,10 +249,35 @@ pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surfac
         .clear_value = gpu.Color{ .r = 0.05, .g = 0.05, .b = 0.05, .a = 1.0 },
     }};
 
+    const depth_texture = device.createTexture(&.{
+        .size = .{
+            .width = renderer.width,
+            .height = renderer.height,
+            .depth_or_array_layers = 1,
+        },
+        .format = .depth24_plus,
+        .usage = gpu.TextureUsage.render_attachment,
+    }).?;
+    defer depth_texture.release();
+
+    const depth_view = depth_texture.createView(&.{
+        .format = .depth24_plus,
+        .dimension = .@"2d",
+        .array_layer_count = 1,
+        .mip_level_count = 1,
+    }).?;
+    defer depth_view.release();
+
     const render_pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor{
         .label = "my render pass",
         .color_attachment_count = color_attachments.len,
         .color_attachments = color_attachments.ptr,
+        .depth_stencil_attachment = &.{
+            .view = depth_view,
+            .depth_clear_value = 1.0,
+            .depth_load_op = .clear,
+            .depth_store_op = .store,
+        },
     }).?;
 
     render_pass.setPipeline(renderer.pipeline);
@@ -263,10 +316,11 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
     }
 }
 
-pub fn updateScale(renderer: Renderer, queue: *gpu.Queue, width: u32, height: u32) void {
+pub fn updateScale(renderer: *Renderer, queue: *gpu.Queue, width: u32, height: u32) void {
     mesh.uniform.scale = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
 
-    std.debug.print("scale: {}\n", .{mesh.uniform.scale});
+    renderer.width = width;
+    renderer.height = height;
 
     queue.writeBuffer(
         renderer.uniform_buffer,

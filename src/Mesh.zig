@@ -4,7 +4,7 @@ pub const Point = extern struct {
     position: Position,
     color: Color,
 
-    pub const Position = [2]f32;
+    pub const Position = [3]f32;
     pub const Color = [3]f32;
 };
 

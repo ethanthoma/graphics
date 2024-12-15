@@ -1,5 +1,5 @@
 struct VertexInput {
-    @location(0) position: vec2f,
+    @location(0) position: vec3f,
     @location(1) color: vec3f,
 };
 
@@ -15,15 +15,42 @@ struct Uniforms {
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
+
+fn rotateY(angle: f32) -> mat4x4f {
+    let c = cos(angle);
+    let s = sin(angle);
+    return mat4x4f(
+        vec4f(c, 0.0, -s, 0.0),
+        vec4f(0.0, 1.0, 0.0, 0.0),
+        vec4f(s, 0.0, c, 0.0),
+        vec4f(0.0, 0.0, 0.0, 1.0)
+    );
+}
+
 @vertex
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    var offset = vec2f(0, 0);
-    offset += 0.3 * vec2f(cos(uniforms.time), sin(uniforms.time));
+    let fov = 0.25 * 3.14159;
+    let f = 1.0 / tan(fov / 2.0);
 
-	out.position = vec4f(in.position.x + offset.x, (in.position.y + offset.y) * uniforms.scale, 0.0, 1.0);
-	out.color = in.color;
+    let projection = mat4x4f(
+        vec4f(f / uniforms.scale, 0.0, 0.0, 0.0),
+        vec4f(0.0, f, 0.0, 0.0),
+        vec4f(0.0, 0.0, -1.0, -1.0),
+        vec4f(0.0, 0.0, -0.1, 0.0)
+    );
+
+    var position = vec4f(in.position.x, in.position.y, in.position.z, 1.0);
+
+    position = rotateY(uniforms.time) * position;
+
+    position.z -= 2.0;
+
+    position = projection * position;
+
+    out.position = position;
+    out.color = in.color;
 
 	return out;
 }
