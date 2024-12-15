@@ -4,6 +4,9 @@ const assert = std.debug.assert;
 const glfw = @import("mach-glfw");
 const gpu = @import("wgpu");
 
+const math = @import("math.zig");
+const Mat4x4 = math.Mat4x4;
+const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
 
 const Renderer = @This();
@@ -222,14 +225,70 @@ fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, u
     }).?;
 }
 
-pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surface, queue: *gpu.Queue, time: f32) !void {
-    // update time
-    mesh.uniform.time = time;
+fn createRotationMatrix(time: f32) Mat4x4 {
+    // Rotate around Y axis
+    const cy = @cos(time);
+    const sy = @sin(time);
+    const ry = Mat4x4{
+        cy,  0.0, sy,  0.0,
+        0.0, 1.0, 0.0, 0.0,
+        -sy, 0.0, cy,  0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+
+    // Rotate around X axis
+    const cx = @cos(time * 0.5);
+    const sx = @sin(time * 0.5);
+    const rx = Mat4x4{
+        1.0, 0.0, 0.0, 0.0,
+        0.0, cx,  sx,  0.0,
+        0.0, -sx, cx,  0.0,
+        0.0, 0.0, 0.0, 1.0,
+    };
+
+    // Multiply matrices (rx * ry)
+    var result: Mat4x4 = undefined;
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        var j: usize = 0;
+        while (j < 4) : (j += 1) {
+            var sum: f32 = 0.0;
+            var k: usize = 0;
+            while (k < 4) : (k += 1) {
+                sum += rx[i * 4 + k] * ry[k * 4 + j];
+            }
+            result[i * 4 + j] = sum;
+        }
+    }
+
+    return result;
+}
+
+pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surface, queue: *gpu.Queue, time: f32, camera: Camera) !void {
+    // update camera
+    mesh.uniform.projection = camera.getProjectionMatrix();
     queue.writeBuffer(
         renderer.uniform_buffer,
-        @offsetOf(Mesh.Uniform, "time"),
-        &mesh.uniform.time,
-        @sizeOf(@TypeOf(mesh.uniform.time)),
+        @offsetOf(Mesh.Uniform, "projection"),
+        &mesh.uniform.projection,
+        @sizeOf(@TypeOf(mesh.uniform.projection)),
+    );
+
+    mesh.uniform.view = camera.getViewMatrix();
+    queue.writeBuffer(
+        renderer.uniform_buffer,
+        @offsetOf(Mesh.Uniform, "view"),
+        &mesh.uniform.view,
+        @sizeOf(@TypeOf(mesh.uniform.view)),
+    );
+
+    // model for cube
+    mesh.uniform.model = createRotationMatrix(time);
+    queue.writeBuffer(
+        renderer.uniform_buffer,
+        @offsetOf(Mesh.Uniform, "model"),
+        &mesh.uniform.model,
+        @sizeOf(@TypeOf(mesh.uniform.model)),
     );
 
     // setup target view
@@ -317,17 +376,9 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
 }
 
 pub fn updateScale(renderer: *Renderer, queue: *gpu.Queue, width: u32, height: u32) void {
-    mesh.uniform.scale = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
-
+    _ = queue;
     renderer.width = width;
     renderer.height = height;
-
-    queue.writeBuffer(
-        renderer.uniform_buffer,
-        @offsetOf(Mesh.Uniform, "scale"),
-        &mesh.uniform.scale,
-        @sizeOf(@TypeOf(mesh.uniform.scale)),
-    );
 }
 
 pub fn deinit(renderer: Renderer) void {

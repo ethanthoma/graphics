@@ -9,8 +9,9 @@ struct VertexOutput {
 };
 
 struct Uniforms {
-    time: f32,
-    scale: f32,
+    projection: mat4x4f,
+    view: mat4x4f,
+    model: mat4x4f,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -31,25 +32,10 @@ fn rotateY(angle: f32) -> mat4x4f {
 fn vs_main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    let fov = 0.25 * 3.14159;
-    let f = 1.0 / tan(fov / 2.0);
+    var world_position = uniforms.model * vec4f(in.position, 1.0);
+    var view_position = uniforms.view * world_position;
+    out.position = uniforms.projection * view_position;
 
-    let projection = mat4x4f(
-        vec4f(f / uniforms.scale, 0.0, 0.0, 0.0),
-        vec4f(0.0, f, 0.0, 0.0),
-        vec4f(0.0, 0.0, -1.0, -1.0),
-        vec4f(0.0, 0.0, -0.1, 0.0)
-    );
-
-    var position = vec4f(in.position.x, in.position.y, in.position.z, 1.0);
-
-    position = rotateY(uniforms.time) * position;
-
-    position.z -= 2.0;
-
-    position = projection * position;
-
-    out.position = position;
     out.color = in.color;
 
 	return out;

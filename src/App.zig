@@ -5,6 +5,7 @@ const glfw = @import("mach-glfw");
 const gpu = @import("wgpu");
 
 const Renderer = @import("Renderer.zig");
+const Camera = @import("Camera.zig");
 
 const Error = error{
     FailedToInitializeGLFW,
@@ -35,8 +36,9 @@ surface: *gpu.Surface,
 surface_format: gpu.TextureFormat,
 renderer: ?Renderer,
 
-width: u32 = 640,
-height: u32 = 480,
+width: u32,
+height: u32,
+camera: Camera,
 
 resize_context: struct {
     device: *gpu.Device,
@@ -52,6 +54,7 @@ pub fn init(allocator: std.mem.Allocator) !*App {
     app.renderer = null;
     app.width = 640;
     app.height = 480;
+    app.camera = Camera{};
 
     try initWindowAndDevice(app);
     std.debug.print("setup renderer...", .{});
@@ -148,7 +151,7 @@ pub fn run(self: *App) void {
 
     const time: f32 = @floatCast(glfw.getTime());
 
-    try self.renderer.?.renderFrame(self.device, self.surface, self.queue, time);
+    try self.renderer.?.renderFrame(self.device, self.surface, self.queue, time, self.camera);
 
     self.surface.present();
 
@@ -179,7 +182,7 @@ fn getRequiredLimits(adapter: *gpu.Adapter) gpu.RequiredLimits {
 
     required_limits.limits.max_bind_groups = 1;
     required_limits.limits.max_uniform_buffers_per_shader_stage = 1;
-    required_limits.limits.max_uniform_buffer_binding_size = 16 * 4;
+    required_limits.limits.max_uniform_buffer_binding_size = 52 * 4;
 
     required_limits.limits.min_uniform_buffer_offset_alignment = supported_limits.limits.min_uniform_buffer_offset_alignment;
     required_limits.limits.min_storage_buffer_offset_alignment = supported_limits.limits.min_storage_buffer_offset_alignment;
