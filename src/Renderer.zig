@@ -4,6 +4,8 @@ const assert = std.debug.assert;
 const glfw = @import("mach-glfw");
 const gpu = @import("wgpu");
 
+const Mesh = @import("Mesh.zig");
+
 const Renderer = @This();
 
 pipeline: *gpu.RenderPipeline,
@@ -15,45 +17,31 @@ point_buffer: *gpu.Buffer,
 uniform_buffer: *gpu.Buffer,
 bind_group: *gpu.BindGroup,
 
-const mesh = struct {
-    const Point = extern struct {
-        position: Position,
-        color: Color,
-
-        const Position = [2]f32;
-        const Color = [3]f32;
-    };
-
-    const Index = [3]u16;
-
-    const Time = f32;
-
-    const points = [_]Point{
+var mesh = Mesh{
+    .points = ([_]Mesh.Point{
         .{ .position = .{ -0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } },
         .{ .position = .{ 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } },
         .{ .position = .{ 0.5, 0.5 }, .color = .{ 0.0, 0.0, 1.0 } },
         .{ .position = .{ -0.5, 0.5 }, .color = .{ 1.0, 1.0, 1.0 } },
-    };
+    })[0..],
 
-    const indices = [_]Index{
+    .indices = ([_]Mesh.Index{
         .{ 0, 1, 2 },
         .{ 0, 2, 3 },
-    };
+    })[0..],
 
-    const time = [1]Time{1};
+    .uniform = .{ .color = .{ 1, 1, 1, 1 } },
 };
 
 pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureFormat) Renderer {
     var renderer: Renderer = undefined;
 
-    std.debug.print("createShaderModule\n", .{});
     const shader_module = device.createShaderModule(&gpu.shaderModuleWGSLDescriptor(.{
         .code = @embedFile("./shader.wgsl"),
     })).?;
     defer shader_module.release();
 
     // create render pipeline
-    std.debug.print("color_targets\n", .{});
     const color_targets = &[_]gpu.ColorTargetState{
         gpu.ColorTargetState{
             .format = surface_format,
@@ -72,9 +60,8 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
         },
     };
 
-    std.debug.print("attributes\n", .{});
     const attributes = &comptime retval: {
-        const fields = @typeInfo(mesh.Point).@"struct".fields;
+        const fields = @typeInfo(Mesh.Point).@"struct".fields;
 
         var _attributes: [fields.len]gpu.VertexAttribute = undefined;
 
@@ -95,6 +82,7 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
                 .shader_location = i,
             };
 
+            // TODO: use @offsetOf
             offset += @sizeOf(field.type);
         }
 
@@ -103,17 +91,16 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
 
     const entries = &[_]gpu.BindGroupLayoutEntry{.{
         .binding = 0,
-        .visibility = gpu.ShaderStage.vertex,
+        .visibility = gpu.ShaderStage.vertex | gpu.ShaderStage.fragment,
         .buffer = .{
             .type = .uniform,
-            .min_binding_size = @sizeOf(mesh.Time),
+            .min_binding_size = @sizeOf(Mesh.Uniform),
         },
         .sampler = .{},
         .texture = .{},
         .storage_texture = .{},
     }};
 
-    std.debug.print("createBindGroupLayout\n", .{});
     renderer.bind_group_layout = device.createBindGroupLayout(&.{
         .label = "my bind group",
         .entry_count = entries.len,
@@ -122,21 +109,19 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
 
     const bind_group_layouts = &[_]*const gpu.BindGroupLayout{renderer.bind_group_layout};
 
-    std.debug.print("createPipelineLayout\n", .{});
     renderer.layout = device.createPipelineLayout(&.{
         .label = "my pipeline layout",
         .bind_group_layout_count = bind_group_layouts.len,
         .bind_group_layouts = bind_group_layouts.ptr,
     }).?;
 
-    std.debug.print("createRenderPipeline\n", .{});
     renderer.pipeline = device.createRenderPipeline(&gpu.RenderPipelineDescriptor{
         .vertex = gpu.VertexState{
             .module = shader_module,
             .entry_point = "vs_main",
             .buffer_count = 1,
             .buffers = &[_]gpu.VertexBufferLayout{.{
-                .array_stride = @sizeOf(mesh.Point),
+                .array_stride = @sizeOf(Mesh.Point),
                 .attribute_count = attributes.len,
                 .attributes = attributes,
             }},
@@ -152,7 +137,7 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
         .layout = renderer.layout,
     }).?;
 
-    renderer.index_count = mesh.indices.len * @typeInfo(mesh.Index).array.len;
+    renderer.index_count = @intCast(mesh.indices.len * @typeInfo(Mesh.Index).array.len);
     renderer.index_buffer = initIndexBuffer(device, queue);
     renderer.point_buffer = initPointBuffer(device, queue);
     renderer.uniform_buffer = initUniformBuffer(device, queue);
@@ -165,9 +150,9 @@ fn initIndexBuffer(device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
     const index_buffer = device.createBuffer(&.{
         .label = "index buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.index,
-        .size = mesh.indices.len * @sizeOf(mesh.Index),
+        .size = mesh.indices.len * @sizeOf(Mesh.Index),
     }).?;
-    queue.writeBuffer(index_buffer, 0, &mesh.indices, mesh.indices.len * @sizeOf(mesh.Index));
+    queue.writeBuffer(index_buffer, 0, mesh.indices.ptr, mesh.indices.len * @sizeOf(Mesh.Index));
 
     return index_buffer;
 }
@@ -176,20 +161,20 @@ fn initPointBuffer(device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
     const point_buffer = device.createBuffer(&.{
         .label = "point buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.vertex,
-        .size = mesh.points.len * @sizeOf(mesh.Point),
+        .size = mesh.points.len * @sizeOf(Mesh.Point),
     }).?;
-    queue.writeBuffer(point_buffer, 0, &mesh.points, mesh.points.len * @sizeOf(mesh.Point));
+    queue.writeBuffer(point_buffer, 0, mesh.points.ptr, mesh.points.len * @sizeOf(Mesh.Point));
 
     return point_buffer;
 }
 
 fn initUniformBuffer(device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
     const uniform_buffer = device.createBuffer(&.{
-        .label = "time buffer",
+        .label = "uniform buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.uniform,
-        .size = @sizeOf(mesh.Time),
+        .size = @sizeOf(Mesh.Uniform),
     }).?;
-    queue.writeBuffer(uniform_buffer, 0, &mesh.time, @sizeOf(mesh.Time));
+    queue.writeBuffer(uniform_buffer, 0, &mesh.uniform, @sizeOf(Mesh.Uniform));
 
     return uniform_buffer;
 }
@@ -198,7 +183,7 @@ fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, u
     const entries = &[_]gpu.BindGroupEntry{.{
         .binding = 0,
         .buffer = uniform_buffer,
-        .size = @sizeOf(mesh.Time),
+        .size = @sizeOf(Mesh.Uniform),
     }};
 
     return device.createBindGroup(&.{
@@ -211,7 +196,18 @@ fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, u
 
 pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surface, queue: *gpu.Queue, time: f32) !void {
     // update uniform_buffer
-    queue.writeBuffer(renderer.uniform_buffer, 0, &time, @sizeOf(@TypeOf(time)));
+    mesh.uniform.time = time;
+    queue.writeBuffer(
+        renderer.uniform_buffer,
+        @offsetOf(Mesh.Uniform, "time"),
+        &mesh.uniform.time,
+        @sizeOf(@TypeOf(mesh.uniform.time)),
+    );
+
+    std.debug.print("{}, {}\n", .{
+        mesh.uniform.time,
+        @as(*f32, @alignCast(@ptrCast(@as([*]u8, @ptrCast(&mesh.uniform))[@offsetOf(Mesh.Uniform, "time")..]))).*,
+    });
 
     // setup target view
     const next_texture = getCurrentTextureView(surface) catch return;
@@ -231,7 +227,7 @@ pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surfac
     }};
 
     const render_pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor{
-        .label = "my redner pass",
+        .label = "my render pass",
         .color_attachment_count = color_attachments.len,
         .color_attachments = color_attachments.ptr,
     }).?;

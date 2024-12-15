@@ -154,12 +154,15 @@ fn getRequiredLimits(adapter: *gpu.Adapter) gpu.RequiredLimits {
     required_limits.limits.max_vertex_buffers = 1;
     required_limits.limits.max_inter_stage_shader_components = 3;
 
-    required_limits.limits.min_uniform_buffer_offset_alignment = supported_limits.limits.min_uniform_buffer_offset_alignment;
-    required_limits.limits.min_storage_buffer_offset_alignment = supported_limits.limits.min_storage_buffer_offset_alignment;
+    required_limits.limits.max_buffer_size = 15 * 5 * @sizeOf(f32);
+    required_limits.limits.max_vertex_buffer_array_stride = 5 * @sizeOf(f32);
 
     required_limits.limits.max_bind_groups = 1;
     required_limits.limits.max_uniform_buffers_per_shader_stage = 1;
     required_limits.limits.max_uniform_buffer_binding_size = 16 * 4;
+
+    required_limits.limits.min_uniform_buffer_offset_alignment = supported_limits.limits.min_uniform_buffer_offset_alignment;
+    required_limits.limits.min_storage_buffer_offset_alignment = supported_limits.limits.min_storage_buffer_offset_alignment;
 
     return required_limits;
 }
