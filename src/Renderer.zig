@@ -30,7 +30,7 @@ var mesh = Mesh{
         .{ 0, 2, 3 },
     })[0..],
 
-    .uniform = .{ .color = .{ 1, 1, 1, 1 } },
+    .uniform = .{},
 };
 
 pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureFormat) Renderer {
@@ -195,7 +195,7 @@ fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, u
 }
 
 pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surface, queue: *gpu.Queue, time: f32) !void {
-    // update uniform_buffer
+    // update time
     mesh.uniform.time = time;
     queue.writeBuffer(
         renderer.uniform_buffer,
@@ -203,11 +203,6 @@ pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surfac
         &mesh.uniform.time,
         @sizeOf(@TypeOf(mesh.uniform.time)),
     );
-
-    std.debug.print("{}, {}\n", .{
-        mesh.uniform.time,
-        @as(*f32, @alignCast(@ptrCast(@as([*]u8, @ptrCast(&mesh.uniform))[@offsetOf(Mesh.Uniform, "time")..]))).*,
-    });
 
     // setup target view
     const next_texture = getCurrentTextureView(surface) catch return;
@@ -266,6 +261,19 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
             return error.FailedToGetCurrentTexture;
         },
     }
+}
+
+pub fn updateScale(renderer: Renderer, queue: *gpu.Queue, width: u32, height: u32) void {
+    mesh.uniform.scale = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
+
+    std.debug.print("scale: {}\n", .{mesh.uniform.scale});
+
+    queue.writeBuffer(
+        renderer.uniform_buffer,
+        @offsetOf(Mesh.Uniform, "scale"),
+        &mesh.uniform.scale,
+        @sizeOf(@TypeOf(mesh.uniform.scale)),
+    );
 }
 
 pub fn deinit(renderer: Renderer) void {

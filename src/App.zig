@@ -26,20 +26,33 @@ fn errorCallback(error_code: glfw.ErrorCode, description: [:0]const u8) void {
 
 const App = @This();
 
+self: *App,
+allocator: std.mem.Allocator,
 window: glfw.Window,
 device: *gpu.Device,
 queue: *gpu.Queue,
 surface: *gpu.Surface,
 surface_format: gpu.TextureFormat,
-renderer: Renderer,
+renderer: ?Renderer,
 
-pub fn init() !App {
-    var app: App = undefined;
+resize_context: struct {
+    device: *gpu.Device,
+    surface: *gpu.Surface,
+    surface_format: gpu.TextureFormat,
+},
 
-    try initWindowAndDevice(&app);
+pub fn init(allocator: std.mem.Allocator) !App {
+    var app = try allocator.create(App);
+
+    app.self = app;
+    app.allocator = allocator;
+    app.renderer = null;
+
+    try initWindowAndDevice(app);
+    std.debug.print("setup renderer...", .{});
     app.renderer = Renderer.init(app.device, app.queue, app.surface_format);
 
-    return app;
+    return app.*;
 }
 
 fn initWindowAndDevice(app: *App) !void {
@@ -101,26 +114,28 @@ fn initWindowAndDevice(app: *App) !void {
     app.surface.getCapabilities(adapter, &capabilites);
     app.surface_format = capabilites.formats[0];
 
-    const size = app.window.getFramebufferSize();
-    app.surface.configure(&.{
+    app.resize_context = .{
         .device = app.device,
-        .format = app.surface_format,
-        .width = size.width,
-        .height = size.height,
-    });
+        .surface = app.surface,
+        .surface_format = app.surface_format,
+    };
 
-    app.window.setUserPointer(@ptrCast(app));
+    app.window.setUserPointer(app);
     app.window.setFramebufferSizeCallback(onWindowResize);
+
+    const size = app.window.getFramebufferSize();
+    onWindowResize(app.window, size.width, size.height);
 }
 
 pub fn deinit(self: *App) void {
-    self.renderer.deinit();
+    self.renderer.?.deinit();
     self.surface.release();
     self.queue.release();
     self.surface.release();
     self.device.release();
     self.window.destroy();
     glfw.terminate();
+    self.self.allocator.destroy(self.self);
 }
 
 pub fn run(self: *App) void {
@@ -128,7 +143,7 @@ pub fn run(self: *App) void {
 
     const time: f32 = @floatCast(glfw.getTime());
 
-    try self.renderer.renderFrame(self.device, self.surface, self.queue, time);
+    try self.renderer.?.renderFrame(self.device, self.surface, self.queue, time);
 
     self.surface.present();
 
@@ -181,12 +196,16 @@ fn glfwGetWGPUSurface(instance: *gpu.Instance, window: glfw.Window) !?*gpu.Surfa
 }
 
 fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
-    _ = width;
-    _ = height;
+    const app = window.getUserPointer(App) orelse return;
 
-    const app = window.getUserPointer(App);
+    std.debug.print("resized {}, {}\n", .{ width, height });
 
-    if (app != null) {
-        std.debug.print("resized\n", .{});
-    }
+    app.surface.configure(&.{
+        .device = app.device,
+        .format = app.surface_format,
+        .width = width,
+        .height = height,
+    });
+
+    if (app.renderer) |renderer| renderer.updateScale(app.queue, width, height);
 }

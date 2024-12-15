@@ -11,9 +11,9 @@ pub const Point = extern struct {
 pub const Index = [3]u16;
 
 pub const Uniform = struct {
-    color: [4]f32 align(16),
-    time: f32 align(16) = 1,
-    _padding: u1 align(16) = undefined,
+    time: f32 align(4) = 1,
+    scale: f32 align(4) = 1,
+    _padding_1: u1 align(4) = undefined,
 };
 
 points: []const Point,
