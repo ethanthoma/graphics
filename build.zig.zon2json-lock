@@ -29,10 +29,10 @@
     "url": "https://pkg.machengine.org/x11-headers/29aefb525d5c08b05b0351e34b1623854a138c21.tar.gz",
     "hash": "sha256-UsbWkOmedS4ygY9C1g7OiPVnTcXzfGKdXImmztYAAiI="
   },
-  "12205937fdcdbc271ed94526e7e9731293c8982b73c5be1c0733c37124d5775c98eb": {
+  "12202d308411c994e286f2dc78edca5eda5446929b9a10dbbedc68b56dbaaeb532d3": {
     "name": "wgpu_native_zig",
-    "url": "https://github.com/ethanthoma/wgpu-native-zig/archive/f659b3febb29f288d7b72aac71aaccb29387006f.tar.gz",
-    "hash": "sha256-TI2PRfum1iMBef9RbuAS/7RMMwFSfJ32KEUT0G75yVc="
+    "url": "https://github.com/ethanthoma/wgpu-native-zig/archive/3b5155fafe5c164b00205890ad9a6e7e5f04f40c.tar.gz",
+    "hash": "sha256-O47dqQszhmAV1D12A5hgvkgHoUOFH5lTTWJBROpG8qM="
   },
   "1220ef2a0bf24558c66bb89c31065459423c2be50273785affd671245629d2f4a448": {
     "name": "wgpu_linux_x86_64_debug",

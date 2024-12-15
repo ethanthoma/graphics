@@ -9,7 +9,8 @@
             .hash = "12207f4bba892c44b3b1b92b13b7ce5df2b49da1e797ba3e02b38b08d1e78c5cec0d",
         },
         .wgpu_native_zig = .{
-            .path = "../wgpu-native-zig/",
+            .url = "https://github.com/ethanthoma/wgpu-native-zig/archive/3b5155fafe5c164b00205890ad9a6e7e5f04f40c.tar.gz",
+            .hash = "12202d308411c994e286f2dc78edca5eda5446929b9a10dbbedc68b56dbaaeb532d3",
         },
     },
 
