@@ -30,7 +30,7 @@ camera: Camera,
 velocity: Velocity = .{},
 
 mesh: Mesh = .{
-    .points = ([_]Mesh.Point{
+    .points = &[_]Mesh.Point{
         // front
         .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 0
         .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 1
@@ -42,8 +42,8 @@ mesh: Mesh = .{
         .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 5
         .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 6
         .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 7
-    })[0..],
-    .indices = ([_]Mesh.Index{
+    },
+    .indices = &[_]Mesh.Index{
         // front
         .{ 0, 1, 2 }, .{ 0, 2, 3 },
         // back
@@ -56,7 +56,14 @@ mesh: Mesh = .{
         .{ 1, 5, 6 }, .{ 1, 6, 2 },
         // left
         .{ 4, 0, 3 }, .{ 4, 3, 7 },
-    })[0..],
+    },
+    .instances = &[_]Mesh.Instance{
+        Mesh.makeInstance(.{ 0, 0, 0 }),
+        Mesh.makeInstance(.{ 0, 2, 0 }),
+        Mesh.makeInstance(.{ 0, -2, 0 }),
+        Mesh.makeInstance(.{ 2, 0, 0 }),
+        Mesh.makeInstance(.{ -2, 0, 0 }),
+    },
     .uniform = .{},
 },
 
@@ -99,7 +106,7 @@ pub fn init(allocator: std.mem.Allocator) !*App {
     onWindowResize(app.window, size.width, size.height);
 
     // setup renderer
-    app.renderer = Renderer.init(app.mesh, app.graphics, app.width, app.height);
+    app.renderer = try Renderer.init(app.mesh, app.graphics, app.width, app.height);
 
     // input
     app.window.setKeyCallback(onKeyInput);
@@ -161,6 +168,8 @@ fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
         .width = width,
         .height = height,
     });
+
+    app.camera.aspect = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
 
     if (app.renderer) |*renderer| renderer.updateScale(app.graphics.queue, width, height);
 }

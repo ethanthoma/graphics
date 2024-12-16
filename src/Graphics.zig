@@ -77,12 +77,14 @@ fn getRequiredLimits(mesh: Mesh, adapter: *gpu.Adapter) gpu.RequiredLimits {
         .limits = .{},
     };
 
-    required_limits.limits.max_vertex_attributes = std.meta.fields(Mesh.Point).len;
-    required_limits.limits.max_vertex_buffers = 1;
+    // TODO: automate this
+    required_limits.limits.max_vertex_attributes = 6;
+    // std.meta.fields(Mesh.Point).len;
+    required_limits.limits.max_vertex_buffers = 2; // should find a way to automate this
     required_limits.limits.max_inter_stage_shader_components = 3; // from shader code itself
 
     required_limits.limits.max_buffer_size = mesh.getMaxBufferSize();
-    required_limits.limits.max_vertex_buffer_array_stride = @sizeOf(Mesh.Point);
+    required_limits.limits.max_vertex_buffer_array_stride = @sizeOf(Mesh.Instance);
 
     required_limits.limits.max_bind_groups = 1; // manual for now
     required_limits.limits.max_uniform_buffers_per_shader_stage = 1; // same

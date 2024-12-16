@@ -10,8 +10,8 @@ pub const Point = extern struct {
     position: Position,
     color: Color,
 
-    pub const Position = [3]f32;
-    pub const Color = [3]f32;
+    pub const Position = Vec3;
+    pub const Color = Vec3;
 };
 
 pub const Index = [3]u16;
@@ -19,13 +19,24 @@ pub const Index = [3]u16;
 pub const Uniform = struct {
     projection: Mat4x4 align(16) = @splat(0),
     view: Mat4x4 align(16) = @splat(0),
-    model: Mat4x4 align(16) = @splat(0),
     _padding: u1 align(4) = undefined,
 };
 
+pub const Instance = Mat4x4;
+
 points: []const Point,
 indices: []const Index,
+instances: []const Instance,
 uniform: Uniform,
+
+pub fn makeInstance(position: Vec3) Instance {
+    return math.Mat4x4{
+        1,           0,           0,           0,
+        0,           1,           0,           0,
+        0,           0,           1,           0,
+        position[0], position[1], position[2], 1,
+    };
+}
 
 pub fn getMaxBufferSize(mesh: Mesh) usize {
     var max_buffer_size: usize = 0;

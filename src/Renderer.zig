@@ -12,19 +12,26 @@ const Mesh = @import("Mesh.zig");
 
 const Renderer = @This();
 
+const Error = error{
+    FailedToCreateShaderModule,
+    FailedToCreateBuffer,
+    FailedToGetCurrentTexture,
+    FailedToCreateRenderPipeline,
+};
+
 pipeline: *gpu.RenderPipeline,
 layout: *gpu.PipelineLayout,
 bind_group_layout: *gpu.BindGroupLayout,
-index_count: u32,
 index_buffer: *gpu.Buffer,
 point_buffer: *gpu.Buffer,
 uniform_buffer: *gpu.Buffer,
+instance_buffer: *gpu.Buffer,
 bind_group: *gpu.BindGroup,
 
 width: u32,
 height: u32,
 
-pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) Renderer {
+pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
     var renderer: Renderer = undefined;
 
     renderer.width = width;
@@ -32,7 +39,7 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) Renderer {
 
     const shader_module = graphics.device.createShaderModule(&gpu.shaderModuleWGSLDescriptor(.{
         .code = @embedFile("./shader.wgsl"),
-    })).?;
+    })) orelse return Error.FailedToCreateShaderModule;
     defer shader_module.release();
 
     // create render pipeline
@@ -64,7 +71,7 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) Renderer {
 
             _attributes[i] = .{
                 .format = switch (field_type) {
-                    .array => |arr| blk: {
+                    .vector => |arr| blk: {
                         if ((arr.len == 2) and (arr.child == f32)) break :blk .float32x2;
                         if ((arr.len == 3) and (arr.child == f32)) break :blk .float32x3;
                         @compileError("unsupported type for vertex data");
@@ -78,6 +85,40 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) Renderer {
 
         break :retval _attributes;
     };
+
+    const instance_attributes = &[_]gpu.VertexAttribute{
+        .{
+            .format = .float32x4,
+            .offset = @sizeOf(f32) * 0,
+            .shader_location = 2,
+        },
+        .{
+            .format = .float32x4,
+            .offset = @sizeOf(f32) * 4,
+            .shader_location = 3,
+        },
+        .{
+            .format = .float32x4,
+            .offset = @sizeOf(f32) * 8,
+            .shader_location = 4,
+        },
+        .{
+            .format = .float32x4,
+            .offset = @sizeOf(f32) * 12,
+            .shader_location = 5,
+        },
+    };
+
+    const buffers = &[_]gpu.VertexBufferLayout{ .{
+        .array_stride = @sizeOf(Mesh.Point),
+        .attribute_count = attributes.len,
+        .attributes = attributes.ptr,
+    }, .{
+        .array_stride = @sizeOf(Mesh.Instance),
+        .attribute_count = instance_attributes.len,
+        .attributes = instance_attributes.ptr,
+        .step_mode = .instance,
+    } };
 
     const entries = &[_]gpu.BindGroupLayoutEntry{.{
         .binding = 0,
@@ -109,12 +150,8 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) Renderer {
         .vertex = gpu.VertexState{
             .module = shader_module,
             .entry_point = "vs_main",
-            .buffer_count = 1,
-            .buffers = &[_]gpu.VertexBufferLayout{.{
-                .array_stride = @sizeOf(Mesh.Point),
-                .attribute_count = attributes.len,
-                .attributes = attributes,
-            }},
+            .buffer_count = buffers.len,
+            .buffers = buffers.ptr,
         },
         .primitive = gpu.PrimitiveState{
             .cull_mode = .back,
@@ -134,54 +171,54 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) Renderer {
         },
         .multisample = gpu.MultisampleState{},
         .layout = renderer.layout,
-    }).?;
+    }) orelse return Error.FailedToCreateRenderPipeline;
 
-    renderer.index_count = @intCast(mesh.indices.len * @typeInfo(Mesh.Index).array.len);
     renderer.index_buffer = initIndexBuffer(mesh, graphics.device, graphics.queue);
     renderer.point_buffer = initPointBuffer(mesh, graphics.device, graphics.queue);
     renderer.uniform_buffer = initUniformBuffer(mesh, graphics.device, graphics.queue);
     renderer.bind_group = initBindGroup(graphics.device, renderer.bind_group_layout, renderer.uniform_buffer);
+    renderer.instance_buffer = initInstanceBuffer(mesh, graphics.device, graphics.queue);
 
     return renderer;
 }
 
 fn initIndexBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
-    const index_buffer = device.createBuffer(&.{
+    const buffer = device.createBuffer(&.{
         .label = "index buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.index,
         .size = mesh.indices.len * @sizeOf(Mesh.Index),
     }).?;
-    queue.writeBuffer(index_buffer, 0, mesh.indices.ptr, mesh.indices.len * @sizeOf(Mesh.Index));
+    queue.writeBuffer(buffer, 0, mesh.indices.ptr, mesh.indices.len * @sizeOf(Mesh.Index));
 
-    return index_buffer;
+    return buffer;
 }
 
 fn initPointBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
-    const point_buffer = device.createBuffer(&.{
+    const buffer = device.createBuffer(&.{
         .label = "point buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.vertex,
         .size = mesh.points.len * @sizeOf(Mesh.Point),
     }).?;
-    queue.writeBuffer(point_buffer, 0, mesh.points.ptr, mesh.points.len * @sizeOf(Mesh.Point));
+    queue.writeBuffer(buffer, 0, mesh.points.ptr, mesh.points.len * @sizeOf(Mesh.Point));
 
-    return point_buffer;
+    return buffer;
 }
 
 fn initUniformBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
-    const uniform_buffer = device.createBuffer(&.{
+    const buffer = device.createBuffer(&.{
         .label = "uniform buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.uniform,
         .size = @sizeOf(Mesh.Uniform),
     }).?;
-    queue.writeBuffer(uniform_buffer, 0, &mesh.uniform, @sizeOf(Mesh.Uniform));
+    queue.writeBuffer(buffer, 0, &mesh.uniform, @sizeOf(Mesh.Uniform));
 
-    return uniform_buffer;
+    return buffer;
 }
 
-fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, uniform_buffer: *gpu.Buffer) *gpu.BindGroup {
+fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, buffer: *gpu.Buffer) *gpu.BindGroup {
     const entries = &[_]gpu.BindGroupEntry{.{
         .binding = 0,
-        .buffer = uniform_buffer,
+        .buffer = buffer,
         .size = @sizeOf(Mesh.Uniform),
     }};
 
@@ -193,46 +230,20 @@ fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, u
     }).?;
 }
 
-fn createRotationMatrix(time: f32) Mat4x4 {
-    // Rotate around Y axis
-    const cy = @cos(time);
-    const sy = @sin(time);
-    const ry = Mat4x4{
-        cy,  0.0, sy,  0.0,
-        0.0, 1.0, 0.0, 0.0,
-        -sy, 0.0, cy,  0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
+fn initInstanceBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
+    const buffer = device.createBuffer(&.{
+        .label = "instance buffer",
+        .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.vertex,
+        .size = mesh.instances.len * @sizeOf(Mesh.Instance),
+    }).?;
+    queue.writeBuffer(buffer, 0, mesh.instances.ptr, mesh.instances.len * @sizeOf(Mesh.Instance));
 
-    // Rotate around X axis
-    const cx = @cos(time * 0.5);
-    const sx = @sin(time * 0.5);
-    const rx = Mat4x4{
-        1.0, 0.0, 0.0, 0.0,
-        0.0, cx,  sx,  0.0,
-        0.0, -sx, cx,  0.0,
-        0.0, 0.0, 0.0, 1.0,
-    };
-
-    // Multiply matrices (rx * ry)
-    var result: Mat4x4 = undefined;
-    var i: usize = 0;
-    while (i < 4) : (i += 1) {
-        var j: usize = 0;
-        while (j < 4) : (j += 1) {
-            var sum: f32 = 0.0;
-            var k: usize = 0;
-            while (k < 4) : (k += 1) {
-                sum += rx[i * 4 + k] * ry[k * 4 + j];
-            }
-            result[i * 4 + j] = sum;
-        }
-    }
-
-    return result;
+    return buffer;
 }
 
 pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f32, camera: Camera) !void {
+    _ = time;
+
     // update camera
     mesh.uniform.projection = camera.getProjectionMatrix();
     graphics.queue.writeBuffer(
@@ -248,15 +259,6 @@ pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f3
         @offsetOf(Mesh.Uniform, "view"),
         &mesh.uniform.view,
         @sizeOf(@TypeOf(mesh.uniform.view)),
-    );
-
-    // model for cube
-    mesh.uniform.model = createRotationMatrix(time);
-    graphics.queue.writeBuffer(
-        renderer.uniform_buffer,
-        @offsetOf(Mesh.Uniform, "model"),
-        &mesh.uniform.model,
-        @sizeOf(@TypeOf(mesh.uniform.model)),
     );
 
     // setup target view
@@ -309,9 +311,16 @@ pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f3
 
     render_pass.setPipeline(renderer.pipeline);
     render_pass.setVertexBuffer(0, renderer.point_buffer, 0, renderer.point_buffer.getSize());
+    render_pass.setVertexBuffer(1, renderer.instance_buffer, 0, renderer.instance_buffer.getSize());
     render_pass.setIndexBuffer(renderer.index_buffer, .uint16, 0, renderer.index_buffer.getSize());
     render_pass.setBindGroup(0, renderer.bind_group, 0, null);
-    render_pass.drawIndexed(renderer.index_count, 1, 0, 0, 0);
+    render_pass.drawIndexed(
+        @intCast(mesh.indices.len * @typeInfo(Mesh.Index).array.len),
+        @intCast(mesh.instances.len),
+        0,
+        0,
+        0,
+    );
     render_pass.end();
     render_pass.release();
 
@@ -338,7 +347,7 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
         }).?,
         else => {
             std.debug.print("Failed to get current texture: {}\n", .{surface_texture.status});
-            return error.FailedToGetCurrentTexture;
+            return Error.FailedToGetCurrentTexture;
         },
     }
 }
