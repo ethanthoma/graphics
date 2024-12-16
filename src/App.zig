@@ -10,6 +10,8 @@ const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
 const math = @import("math.zig");
 const Vec3 = math.Vec3;
+const Chunk = @import("Chunk.zig");
+const Input = @import("Input.zig");
 
 const Error = error{
     FailedToInitializeGLFW,
@@ -25,51 +27,18 @@ renderer: ?Renderer,
 
 width: u32,
 height: u32,
-camera: Camera,
 
-velocity: Velocity = .{},
+camera: Camera = .{},
+input: Input = .{},
 
-mesh: Mesh = .{
-    .points = &[_]Mesh.Point{
-        // front
-        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 0
-        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 1.0, 1.0, 0.0 } }, // 1
-        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 2
-        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.0, 1.0, 1.0 } }, // 3
-
-        // back
-        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 1.0 } }, // 4
-        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 5
-        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 0.0 } }, // 6
-        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 7
-    },
-    .indices = &[_]Mesh.Index{
-        // front
-        .{ 0, 1, 2 }, .{ 0, 2, 3 },
-        // back
-        .{ 5, 4, 7 }, .{ 5, 7, 6 },
-        // top
-        .{ 3, 2, 6 }, .{ 3, 6, 7 },
-        // bottom
-        .{ 4, 5, 1 }, .{ 4, 1, 0 },
-        // right
-        .{ 1, 5, 6 }, .{ 1, 6, 2 },
-        // left
-        .{ 4, 0, 3 }, .{ 4, 3, 7 },
-    },
-    .instances = &[_]Mesh.Instance{
-        Mesh.makeInstance(.{ 0, 0, 0 }),
-        Mesh.makeInstance(.{ 0, 1, 0 }),
-        Mesh.makeInstance(.{ 0, -1, 0 }),
-        Mesh.makeInstance(.{ 1, 0, 0 }),
-        Mesh.makeInstance(.{ -1, 0, 0 }),
-    },
-    .uniform = .{},
-},
+mesh: Mesh,
 
 pub fn init(allocator: std.mem.Allocator) !*App {
     var app = try allocator.create(App);
     errdefer allocator.destroy(app);
+
+    var chunk = Chunk.init();
+    const chunk_mesh = try chunk.generateMesh(.{ 0, 0, 0 }, allocator);
 
     app.* = .{
         .allocator = allocator,
@@ -78,7 +47,7 @@ pub fn init(allocator: std.mem.Allocator) !*App {
         .renderer = null,
         .width = 640,
         .height = 480,
-        .camera = Camera{},
+        .mesh = chunk_mesh,
     };
 
     // init glfw
@@ -110,7 +79,6 @@ pub fn init(allocator: std.mem.Allocator) !*App {
 
     // input
     app.window.setKeyCallback(onKeyInput);
-
     return app;
 }
 
@@ -137,10 +105,10 @@ pub fn run(self: *App) void {
 }
 
 fn update(self: *App) void {
-    if (@reduce(.Add, self.velocity.toVec3() * self.velocity.toVec3()) > 0) {
+    if (@reduce(.Add, self.input.toVec3() * self.input.toVec3()) > 0) {
         const movement_speed: Vec3 = @splat(0.1);
 
-        self.camera.moveRelative(self.velocity.toVec3() * movement_speed);
+        self.camera.moveRelative(self.input.toVec3() * movement_speed);
     }
 }
 
@@ -174,80 +142,6 @@ fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
     if (app.renderer) |*renderer| renderer.updateScale(app.graphics.queue, width, height);
 }
 
-const Velocity = struct {
-    horizontal: enum { none, left, right } = .none,
-    vertical: enum { none, forward, backward } = .none,
-
-    pressed_w: bool = false,
-    pressed_a: bool = false,
-    pressed_s: bool = false,
-    pressed_d: bool = false,
-
-    pub fn update(self: *@This(), key: glfw.Key, action: glfw.Action) void {
-        const is_press = action == .press;
-        const is_release = action == .release;
-        switch (key) {
-            .a => if (is_press or is_release) {
-                self.pressed_a = is_press;
-                if (is_press) {
-                    self.horizontal = .left;
-                } else if (self.pressed_d) {
-                    self.horizontal = .right;
-                } else {
-                    self.horizontal = .none;
-                }
-            },
-            .d => if (is_press or is_release) {
-                self.pressed_d = is_press;
-                if (is_press) {
-                    self.horizontal = .right;
-                } else if (self.pressed_a) {
-                    self.horizontal = .left;
-                } else {
-                    self.horizontal = .none;
-                }
-            },
-            .w => if (is_press or is_release) {
-                self.pressed_w = is_press;
-                if (is_press) {
-                    self.vertical = .forward;
-                } else if (self.pressed_s) {
-                    self.vertical = .backward;
-                } else {
-                    self.vertical = .none;
-                }
-            },
-            .s => if (is_press or is_release) {
-                self.pressed_s = is_press;
-                if (is_press) {
-                    self.vertical = .backward;
-                } else if (self.pressed_w) {
-                    self.vertical = .forward;
-                } else {
-                    self.vertical = .none;
-                }
-            },
-            else => {},
-        }
-    }
-
-    pub fn toVec3(self: @This()) Vec3 {
-        return .{
-            switch (self.horizontal) {
-                .none => 0,
-                .left => -1,
-                .right => 1,
-            },
-            switch (self.vertical) {
-                .none => 0,
-                .forward => 1,
-                .backward => -1,
-            },
-            0,
-        };
-    }
-};
-
 fn onKeyInput(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
     _ = scancode;
     _ = mods;
@@ -260,5 +154,5 @@ fn onKeyInput(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Ac
         return;
     }
 
-    app.velocity.update(key, action);
+    app.input.update(key, action);
 }

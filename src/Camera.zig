@@ -40,15 +40,22 @@ pub fn getProjectionMatrix(self: Camera) Mat4x4 {
 
 pub fn moveRelative(self: *Camera, velocity: Vec3) void {
     const forward = math.normalize(self.target - self.position);
-
     const right = math.normalize(math.cross(forward, self.up));
 
-    const movement = Vec3{
-        right[0] * velocity[0] + forward[0] * velocity[1],
-        right[1] * velocity[0] + forward[1] * velocity[1],
-        right[2] * velocity[0] + forward[2] * velocity[1],
+    const planar_movement = Vec3{
+        right[0] * velocity[0] + forward[0] * velocity[2],
+        right[1] * velocity[0] + forward[1] * velocity[2],
+        right[2] * velocity[0] + forward[2] * velocity[2],
     };
+
+    const movement = planar_movement + Vec3{ 0, velocity[1], 0 };
 
     self.position += movement;
     self.target += movement;
+
+    std.debug.print("position: {d:.2}, {d:.2}, {d:.2}\n", .{
+        self.position[0],
+        self.position[1],
+        self.position[2],
+    });
 }
