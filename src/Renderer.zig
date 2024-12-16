@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const glfw = @import("mach-glfw");
 const gpu = @import("wgpu");
 
+const Graphics = @import("Graphics.zig");
 const math = @import("math.zig");
 const Mat4x4 = math.Mat4x4;
 const Camera = @import("Camera.zig");
@@ -23,46 +24,13 @@ bind_group: *gpu.BindGroup,
 width: u32,
 height: u32,
 
-var mesh = Mesh{
-    .points = ([_]Mesh.Point{
-        // front
-        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 0
-        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 1
-        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 2
-        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 3
-
-        // back
-        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 4
-        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 5
-        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 6
-        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 7
-    })[0..],
-
-    .indices = ([_]Mesh.Index{
-        // front
-        .{ 0, 1, 2 }, .{ 0, 2, 3 },
-        // back
-        .{ 5, 4, 7 }, .{ 5, 7, 6 },
-        // top
-        .{ 3, 2, 6 }, .{ 3, 6, 7 },
-        // bottom
-        .{ 4, 5, 1 }, .{ 4, 1, 0 },
-        // right
-        .{ 1, 5, 6 }, .{ 1, 6, 2 },
-        // left
-        .{ 4, 0, 3 }, .{ 4, 3, 7 },
-    })[0..],
-
-    .uniform = .{},
-};
-
-pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureFormat, width: u32, height: u32) Renderer {
+pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) Renderer {
     var renderer: Renderer = undefined;
 
     renderer.width = width;
     renderer.height = height;
 
-    const shader_module = device.createShaderModule(&gpu.shaderModuleWGSLDescriptor(.{
+    const shader_module = graphics.device.createShaderModule(&gpu.shaderModuleWGSLDescriptor(.{
         .code = @embedFile("./shader.wgsl"),
     })).?;
     defer shader_module.release();
@@ -70,7 +38,7 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
     // create render pipeline
     const color_targets = &[_]gpu.ColorTargetState{
         gpu.ColorTargetState{
-            .format = surface_format,
+            .format = graphics.surface_format,
             .blend = &gpu.BlendState{
                 .color = gpu.BlendComponent{
                     .operation = .add,
@@ -123,7 +91,7 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
         .storage_texture = .{},
     }};
 
-    renderer.bind_group_layout = device.createBindGroupLayout(&.{
+    renderer.bind_group_layout = graphics.device.createBindGroupLayout(&.{
         .label = "my bind group",
         .entry_count = entries.len,
         .entries = entries.ptr,
@@ -131,13 +99,13 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
 
     const bind_group_layouts = &[_]*const gpu.BindGroupLayout{renderer.bind_group_layout};
 
-    renderer.layout = device.createPipelineLayout(&.{
+    renderer.layout = graphics.device.createPipelineLayout(&.{
         .label = "my pipeline layout",
         .bind_group_layout_count = bind_group_layouts.len,
         .bind_group_layouts = bind_group_layouts.ptr,
     }).?;
 
-    renderer.pipeline = device.createRenderPipeline(&gpu.RenderPipelineDescriptor{
+    renderer.pipeline = graphics.device.createRenderPipeline(&gpu.RenderPipelineDescriptor{
         .vertex = gpu.VertexState{
             .module = shader_module,
             .entry_point = "vs_main",
@@ -169,15 +137,15 @@ pub fn init(device: *gpu.Device, queue: *gpu.Queue, surface_format: gpu.TextureF
     }).?;
 
     renderer.index_count = @intCast(mesh.indices.len * @typeInfo(Mesh.Index).array.len);
-    renderer.index_buffer = initIndexBuffer(device, queue);
-    renderer.point_buffer = initPointBuffer(device, queue);
-    renderer.uniform_buffer = initUniformBuffer(device, queue);
-    renderer.bind_group = initBindGroup(device, renderer.bind_group_layout, renderer.uniform_buffer);
+    renderer.index_buffer = initIndexBuffer(mesh, graphics.device, graphics.queue);
+    renderer.point_buffer = initPointBuffer(mesh, graphics.device, graphics.queue);
+    renderer.uniform_buffer = initUniformBuffer(mesh, graphics.device, graphics.queue);
+    renderer.bind_group = initBindGroup(graphics.device, renderer.bind_group_layout, renderer.uniform_buffer);
 
     return renderer;
 }
 
-fn initIndexBuffer(device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
+fn initIndexBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
     const index_buffer = device.createBuffer(&.{
         .label = "index buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.index,
@@ -188,7 +156,7 @@ fn initIndexBuffer(device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
     return index_buffer;
 }
 
-fn initPointBuffer(device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
+fn initPointBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
     const point_buffer = device.createBuffer(&.{
         .label = "point buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.vertex,
@@ -199,7 +167,7 @@ fn initPointBuffer(device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
     return point_buffer;
 }
 
-fn initUniformBuffer(device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
+fn initUniformBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
     const uniform_buffer = device.createBuffer(&.{
         .label = "uniform buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.uniform,
@@ -264,10 +232,10 @@ fn createRotationMatrix(time: f32) Mat4x4 {
     return result;
 }
 
-pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surface, queue: *gpu.Queue, time: f32, camera: Camera) !void {
+pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f32, camera: Camera) !void {
     // update camera
     mesh.uniform.projection = camera.getProjectionMatrix();
-    queue.writeBuffer(
+    graphics.queue.writeBuffer(
         renderer.uniform_buffer,
         @offsetOf(Mesh.Uniform, "projection"),
         &mesh.uniform.projection,
@@ -275,7 +243,7 @@ pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surfac
     );
 
     mesh.uniform.view = camera.getViewMatrix();
-    queue.writeBuffer(
+    graphics.queue.writeBuffer(
         renderer.uniform_buffer,
         @offsetOf(Mesh.Uniform, "view"),
         &mesh.uniform.view,
@@ -284,7 +252,7 @@ pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surfac
 
     // model for cube
     mesh.uniform.model = createRotationMatrix(time);
-    queue.writeBuffer(
+    graphics.queue.writeBuffer(
         renderer.uniform_buffer,
         @offsetOf(Mesh.Uniform, "model"),
         &mesh.uniform.model,
@@ -292,11 +260,11 @@ pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surfac
     );
 
     // setup target view
-    const next_texture = getCurrentTextureView(surface) catch return;
+    const next_texture = getCurrentTextureView(graphics.surface) catch return;
     defer next_texture.release();
 
     // setup encoder
-    const encoder = device.createCommandEncoder(&.{
+    const encoder = graphics.device.createCommandEncoder(&.{
         .label = "my command encoder",
     }).?;
     defer encoder.release();
@@ -308,7 +276,7 @@ pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surfac
         .clear_value = gpu.Color{ .r = 0.05, .g = 0.05, .b = 0.05, .a = 1.0 },
     }};
 
-    const depth_texture = device.createTexture(&.{
+    const depth_texture = graphics.device.createTexture(&.{
         .size = .{
             .width = renderer.width,
             .height = renderer.height,
@@ -352,7 +320,7 @@ pub fn renderFrame(renderer: Renderer, device: *gpu.Device, surface: *gpu.Surfac
     }).?;
     defer command.release();
 
-    queue.submit(&[_]*const gpu.CommandBuffer{command});
+    graphics.queue.submit(&[_]*const gpu.CommandBuffer{command});
 }
 
 fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {

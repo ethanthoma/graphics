@@ -4,146 +4,105 @@ const assert = std.debug.assert;
 const glfw = @import("mach-glfw");
 const gpu = @import("wgpu");
 
+const Graphics = @import("Graphics.zig");
 const Renderer = @import("Renderer.zig");
 const Camera = @import("Camera.zig");
+const Mesh = @import("Mesh.zig");
 
 const Error = error{
     FailedToInitializeGLFW,
     FailedToOpenWindow,
-    FailedToCreateInstance,
-    FailedToGetSurface,
-    FailedToGetAdapter,
-    FailedToGetDevice,
-    FailedToGetQueue,
-    FailedToGetWaylandDisplay,
-    FailedToGetWaylandWindow,
-    FailedToGetTextureView,
-    FailedToGetCurrentTexture,
 };
-
-fn errorCallback(error_code: glfw.ErrorCode, description: [:0]const u8) void {
-    std.log.err("glfw: {}: {s}\n", .{ error_code, description });
-}
 
 const App = @This();
 
-self: *App,
 allocator: std.mem.Allocator,
 window: glfw.Window,
-device: *gpu.Device,
-queue: *gpu.Queue,
-surface: *gpu.Surface,
-surface_format: gpu.TextureFormat,
+graphics: Graphics,
 renderer: ?Renderer,
 
 width: u32,
 height: u32,
 camera: Camera,
 
-resize_context: struct {
-    device: *gpu.Device,
-    surface: *gpu.Surface,
-    surface_format: gpu.TextureFormat,
+mesh: Mesh = .{
+    .points = ([_]Mesh.Point{
+        // front
+        .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 0
+        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 1
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 2
+        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 3
+
+        // back
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 4
+        .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 5
+        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 6
+        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 7
+    })[0..],
+    .indices = ([_]Mesh.Index{
+        // front
+        .{ 0, 1, 2 }, .{ 0, 2, 3 },
+        // back
+        .{ 5, 4, 7 }, .{ 5, 7, 6 },
+        // top
+        .{ 3, 2, 6 }, .{ 3, 6, 7 },
+        // bottom
+        .{ 4, 5, 1 }, .{ 4, 1, 0 },
+        // right
+        .{ 1, 5, 6 }, .{ 1, 6, 2 },
+        // left
+        .{ 4, 0, 3 }, .{ 4, 3, 7 },
+    })[0..],
+    .uniform = .{},
 },
 
 pub fn init(allocator: std.mem.Allocator) !*App {
     var app = try allocator.create(App);
+    errdefer allocator.destroy(app);
 
-    app.self = app;
-    app.allocator = allocator;
-    app.renderer = null;
-    app.width = 640;
-    app.height = 480;
-    app.camera = Camera{};
+    app.* = .{
+        .allocator = allocator,
+        .window = undefined,
+        .graphics = undefined,
+        .renderer = null,
+        .width = 640,
+        .height = 480,
+        .camera = Camera{},
+    };
 
-    try initWindowAndDevice(app);
-    std.debug.print("setup renderer...", .{});
-    app.renderer = Renderer.init(app.device, app.queue, app.surface_format, app.width, app.height);
-
-    return app;
-}
-
-fn initWindowAndDevice(app: *App) !void {
     // init glfw
-    glfw.setErrorCallback(errorCallback);
-    if (!glfw.init(.{})) {
-        std.debug.print("Failed to initialize GLFW\n", .{});
-    }
+    _ = glfw.init(.{}) or return Error.FailedToInitializeGLFW;
     errdefer glfw.terminate();
 
-    // Create instance
-    const instance = gpu.Instance.create(null) orelse {
-        std.debug.print("Failed to create gpu instance\n", .{});
-        return Error.FailedToCreateInstance;
-    };
-    defer instance.release();
-
-    // Open window
+    // open window
     app.window = glfw.Window.create(app.width, app.height, "VOXEL", null, null, .{
         .resizable = false,
         .client_api = .no_api,
-    }) orelse {
-        std.debug.print("Failed to open window\n", .{});
-        return Error.FailedToOpenWindow;
-    };
+    }) orelse return Error.FailedToOpenWindow;
     errdefer app.window.destroy();
 
-    // Create surface
-    app.surface = try glfwGetWGPUSurface(instance, app.window) orelse {
-        return Error.FailedToGetSurface;
-    };
-    errdefer app.surface.release();
+    // setup graphics
+    app.graphics = try Graphics.init(app.mesh, app.window);
 
-    // Get adapter
-    const adapter_response = instance.requestAdapterSync(&.{
-        .compatible_surface = app.surface,
-    });
-    const adapter: *gpu.Adapter = switch (adapter_response.status) {
-        .success => adapter_response.adapter.?,
-        else => return Error.FailedToGetAdapter,
-    };
-    defer adapter.release();
-
-    // Get device
-    const device_response = adapter.requestDeviceSync(&.{
-        .label = "My Device",
-        .required_limits = &getRequiredLimits(adapter),
-    });
-    app.device = switch (device_response.status) {
-        .success => device_response.device.?,
-        else => return Error.FailedToGetDevice,
-    };
-
-    // Get queue
-    app.queue = app.device.getQueue() orelse return Error.FailedToGetQueue;
-
-    // Configure surface
-    var capabilites: gpu.SurfaceCapabilities = .{};
-    app.surface.getCapabilities(adapter, &capabilites);
-    app.surface_format = capabilites.formats[0];
-
-    app.resize_context = .{
-        .device = app.device,
-        .surface = app.surface,
-        .surface_format = app.surface_format,
-    };
-
+    // setup resizing
     app.window.setUserPointer(app);
     app.window.setFramebufferSizeCallback(onWindowResize);
 
     const size = app.window.getFramebufferSize();
     onWindowResize(app.window, size.width, size.height);
+
+    // setup renderer
+    app.renderer = Renderer.init(app.mesh, app.graphics, app.width, app.height);
+
+    return app;
 }
 
 pub fn deinit(self: *App) void {
     self.renderer.?.deinit();
-    self.surface.release();
-    self.queue.release();
-    self.surface.release();
-    self.device.release();
+    self.graphics.deinit();
     self.window.destroy();
     glfw.terminate();
-    self.self.allocator.destroy(self.self);
+    self.allocator.destroy(self);
 }
 
 pub fn run(self: *App) void {
@@ -151,56 +110,15 @@ pub fn run(self: *App) void {
 
     const time: f32 = @floatCast(glfw.getTime());
 
-    try self.renderer.?.renderFrame(self.device, self.surface, self.queue, time, self.camera);
+    try self.renderer.?.renderFrame(self.graphics, &self.mesh, time, self.camera);
 
-    self.surface.present();
+    self.graphics.surface.present();
 
-    _ = self.device.poll(true, null);
+    _ = self.graphics.device.poll(true, null);
 }
 
 pub fn isRunning(self: *App) bool {
     return !glfw.Window.shouldClose(self.window);
-}
-
-fn getRequiredLimits(adapter: *gpu.Adapter) gpu.RequiredLimits {
-    var supported_limits: gpu.SupportedLimits = .{
-        .limits = .{},
-    };
-
-    _ = adapter.getLimits(&supported_limits);
-
-    var required_limits: gpu.RequiredLimits = .{
-        .limits = .{},
-    };
-
-    required_limits.limits.max_vertex_attributes = 2;
-    required_limits.limits.max_vertex_buffers = 1;
-    required_limits.limits.max_inter_stage_shader_components = 3;
-
-    required_limits.limits.max_buffer_size = 15 * 5 * @sizeOf(f32);
-    required_limits.limits.max_vertex_buffer_array_stride = 6 * @sizeOf(f32);
-
-    required_limits.limits.max_bind_groups = 1;
-    required_limits.limits.max_uniform_buffers_per_shader_stage = 1;
-    required_limits.limits.max_uniform_buffer_binding_size = 52 * 4;
-
-    required_limits.limits.min_uniform_buffer_offset_alignment = supported_limits.limits.min_uniform_buffer_offset_alignment;
-    required_limits.limits.min_storage_buffer_offset_alignment = supported_limits.limits.min_storage_buffer_offset_alignment;
-
-    return required_limits;
-}
-
-// wayland only
-fn glfwGetWGPUSurface(instance: *gpu.Instance, window: glfw.Window) !?*gpu.Surface {
-    const Native = glfw.Native(.{ .wayland = true });
-
-    return instance.createSurface(&.{
-        .next_in_chain = &(gpu.SurfaceDescriptorFromWaylandSurface{
-            .display = Native.getWaylandDisplay(),
-            .surface = Native.getWaylandWindow(window),
-        }).chain,
-        .label = null,
-    });
 }
 
 fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
@@ -211,12 +129,12 @@ fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
 
     std.debug.print("resized {}, {}\n", .{ width, height });
 
-    app.surface.configure(&.{
-        .device = app.device,
-        .format = app.surface_format,
+    app.graphics.surface.configure(&.{
+        .device = app.graphics.device,
+        .format = app.graphics.surface_format,
         .width = width,
         .height = height,
     });
 
-    if (app.renderer) |*renderer| renderer.updateScale(app.queue, width, height);
+    if (app.renderer) |*renderer| renderer.updateScale(app.graphics.queue, width, height);
 }
