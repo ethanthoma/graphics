@@ -46,3 +46,9 @@ pub fn getMaxBufferSize(mesh: Mesh) usize {
 
     return max_buffer_size;
 }
+
+pub fn getMaxUniformBufferBindingSize(mesh: Mesh) usize {
+    _ = mesh;
+
+    return @sizeOf(Uniform);
+}

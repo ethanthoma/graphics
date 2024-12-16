@@ -86,7 +86,7 @@ fn getRequiredLimits(mesh: Mesh, adapter: *gpu.Adapter) gpu.RequiredLimits {
 
     required_limits.limits.max_bind_groups = 1; // manual for now
     required_limits.limits.max_uniform_buffers_per_shader_stage = 1; // same
-    required_limits.limits.max_uniform_buffer_binding_size = @sizeOf(Mesh.Uniform);
+    required_limits.limits.max_uniform_buffer_binding_size = mesh.getMaxUniformBufferBindingSize();
 
     required_limits.limits.min_uniform_buffer_offset_alignment = supported_limits.limits.min_uniform_buffer_offset_alignment;
     required_limits.limits.min_storage_buffer_offset_alignment = supported_limits.limits.min_storage_buffer_offset_alignment;
