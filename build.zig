@@ -18,8 +18,6 @@ pub fn build(b: *std.Build) void {
 
     exe.root_module.addImport("wgpu", b.dependency("wgpu_native_zig", .{}).module("wgpu"));
 
-    addShader(b, exe);
-
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -42,10 +40,4 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_unit_tests.step);
-}
-
-fn addShader(b: *std.Build, exe: *std.Build.Step.Compile) void {
-    exe.root_module.addAnonymousImport("shader", .{
-        .root_source_file = b.path("src/shader.wgsl"),
-    });
 }

@@ -33,15 +33,15 @@ mesh: Mesh = .{
     .points = &[_]Mesh.Point{
         // front
         .{ .position = .{ -0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 0
-        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 1
-        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 2
-        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 3
+        .{ .position = .{ 0.5, -0.5, 0.5 }, .color = .{ 1.0, 1.0, 0.0 } }, // 1
+        .{ .position = .{ 0.5, 0.5, 0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 2
+        .{ .position = .{ -0.5, 0.5, 0.5 }, .color = .{ 0.0, 1.0, 1.0 } }, // 3
 
         // back
-        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 4
+        .{ .position = .{ -0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 1.0 } }, // 4
         .{ .position = .{ 0.5, -0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 5
-        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 6
-        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 0.0, 1.0, 0.0 } }, // 7
+        .{ .position = .{ 0.5, 0.5, -0.5 }, .color = .{ 1.0, 1.0, 0.0 } }, // 6
+        .{ .position = .{ -0.5, 0.5, -0.5 }, .color = .{ 1.0, 0.0, 0.0 } }, // 7
     },
     .indices = &[_]Mesh.Index{
         // front
@@ -59,10 +59,10 @@ mesh: Mesh = .{
     },
     .instances = &[_]Mesh.Instance{
         Mesh.makeInstance(.{ 0, 0, 0 }),
-        Mesh.makeInstance(.{ 0, 2, 0 }),
-        Mesh.makeInstance(.{ 0, -2, 0 }),
-        Mesh.makeInstance(.{ 2, 0, 0 }),
-        Mesh.makeInstance(.{ -2, 0, 0 }),
+        Mesh.makeInstance(.{ 0, 1, 0 }),
+        Mesh.makeInstance(.{ 0, -1, 0 }),
+        Mesh.makeInstance(.{ 1, 0, 0 }),
+        Mesh.makeInstance(.{ -1, 0, 0 }),
     },
     .uniform = .{},
 },
