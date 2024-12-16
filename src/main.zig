@@ -10,6 +10,6 @@ pub fn main() !void {
     defer app.deinit();
 
     while (app.isRunning()) {
-        app.run();
+        try app.run();
     }
 }

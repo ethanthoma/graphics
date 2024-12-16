@@ -90,7 +90,7 @@ pub fn deinit(self: *App) void {
     self.allocator.destroy(self);
 }
 
-pub fn run(self: *App) void {
+pub fn run(self: *App) !void {
     glfw.pollEvents();
 
     const time: f32 = @floatCast(glfw.getTime());

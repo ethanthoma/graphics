@@ -14,9 +14,17 @@ const Renderer = @This();
 
 const Error = error{
     FailedToCreateShaderModule,
-    FailedToCreateBuffer,
     FailedToGetCurrentTexture,
+    FailedToCreateCommandEncoder,
+    FailedToCreateTexture,
+    FailedToCreateView,
+    FailedToCreateBindGroupLayout,
     FailedToCreateRenderPipeline,
+    FailedToCreatePipelineLayout,
+    FailedToCreateBuffer,
+    FailedToCreateBindGroup,
+    FailedToBeginRenderPass,
+    FailedToFinishEncoder,
 };
 
 pipeline: *gpu.RenderPipeline,
@@ -136,7 +144,7 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
         .label = "my bind group",
         .entry_count = entries.len,
         .entries = entries.ptr,
-    }).?;
+    }) orelse return Error.FailedToCreateBindGroupLayout;
 
     const bind_group_layouts = &[_]*const gpu.BindGroupLayout{renderer.bind_group_layout};
 
@@ -144,7 +152,7 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
         .label = "my pipeline layout",
         .bind_group_layout_count = bind_group_layouts.len,
         .bind_group_layouts = bind_group_layouts.ptr,
-    }).?;
+    }) orelse return Error.FailedToCreatePipelineLayout;
 
     renderer.pipeline = graphics.device.createRenderPipeline(&gpu.RenderPipelineDescriptor{
         .vertex = gpu.VertexState{
@@ -173,49 +181,49 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
         .layout = renderer.layout,
     }) orelse return Error.FailedToCreateRenderPipeline;
 
-    renderer.index_buffer = initIndexBuffer(mesh, graphics.device, graphics.queue);
-    renderer.point_buffer = initPointBuffer(mesh, graphics.device, graphics.queue);
-    renderer.uniform_buffer = initUniformBuffer(mesh, graphics.device, graphics.queue);
-    renderer.bind_group = initBindGroup(graphics.device, renderer.bind_group_layout, renderer.uniform_buffer);
-    renderer.instance_buffer = initInstanceBuffer(mesh, graphics.device, graphics.queue);
+    renderer.index_buffer = try initIndexBuffer(mesh, graphics.device, graphics.queue);
+    renderer.point_buffer = try initPointBuffer(mesh, graphics.device, graphics.queue);
+    renderer.uniform_buffer = try initUniformBuffer(mesh, graphics.device, graphics.queue);
+    renderer.bind_group = try initBindGroup(graphics.device, renderer.bind_group_layout, renderer.uniform_buffer);
+    renderer.instance_buffer = try initInstanceBuffer(mesh, graphics.device, graphics.queue);
 
     return renderer;
 }
 
-fn initIndexBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
+fn initIndexBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) !*gpu.Buffer {
     const buffer = device.createBuffer(&.{
         .label = "index buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.index,
         .size = mesh.indices.len * @sizeOf(Mesh.Index),
-    }).?;
+    }) orelse return Error.FailedToCreateBuffer;
     queue.writeBuffer(buffer, 0, mesh.indices.ptr, mesh.indices.len * @sizeOf(Mesh.Index));
 
     return buffer;
 }
 
-fn initPointBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
+fn initPointBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) !*gpu.Buffer {
     const buffer = device.createBuffer(&.{
         .label = "point buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.vertex,
         .size = mesh.points.len * @sizeOf(Mesh.Point),
-    }).?;
+    }) orelse return Error.FailedToCreateBuffer;
     queue.writeBuffer(buffer, 0, mesh.points.ptr, mesh.points.len * @sizeOf(Mesh.Point));
 
     return buffer;
 }
 
-fn initUniformBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
+fn initUniformBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) !*gpu.Buffer {
     const buffer = device.createBuffer(&.{
         .label = "uniform buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.uniform,
         .size = @sizeOf(Mesh.Uniform),
-    }).?;
+    }) orelse return Error.FailedToCreateBuffer;
     queue.writeBuffer(buffer, 0, &mesh.uniform, @sizeOf(Mesh.Uniform));
 
     return buffer;
 }
 
-fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, buffer: *gpu.Buffer) *gpu.BindGroup {
+fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, buffer: *gpu.Buffer) !*gpu.BindGroup {
     const entries = &[_]gpu.BindGroupEntry{.{
         .binding = 0,
         .buffer = buffer,
@@ -227,15 +235,15 @@ fn initBindGroup(device: *gpu.Device, bind_group_layout: *gpu.BindGroupLayout, b
         .layout = bind_group_layout,
         .entry_count = entries.len,
         .entries = entries.ptr,
-    }).?;
+    }) orelse return Error.FailedToCreateBindGroup;
 }
 
-fn initInstanceBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) *gpu.Buffer {
+fn initInstanceBuffer(mesh: Mesh, device: *gpu.Device, queue: *gpu.Queue) !*gpu.Buffer {
     const buffer = device.createBuffer(&.{
         .label = "instance buffer",
         .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.vertex,
         .size = mesh.instances.len * @sizeOf(Mesh.Instance),
-    }).?;
+    }) orelse return Error.FailedToCreateBuffer;
     queue.writeBuffer(buffer, 0, mesh.instances.ptr, mesh.instances.len * @sizeOf(Mesh.Instance));
 
     return buffer;
@@ -268,7 +276,7 @@ pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f3
     // setup encoder
     const encoder = graphics.device.createCommandEncoder(&.{
         .label = "my command encoder",
-    }).?;
+    }) orelse return Error.FailedToCreateCommandEncoder;
     defer encoder.release();
 
     // setup renderpass
@@ -286,7 +294,7 @@ pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f3
         },
         .format = .depth24_plus,
         .usage = gpu.TextureUsage.render_attachment,
-    }).?;
+    }) orelse return Error.FailedToCreateTexture;
     defer depth_texture.release();
 
     const depth_view = depth_texture.createView(&.{
@@ -294,7 +302,7 @@ pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f3
         .dimension = .@"2d",
         .array_layer_count = 1,
         .mip_level_count = 1,
-    }).?;
+    }) orelse return Error.FailedToCreateView;
     defer depth_view.release();
 
     const render_pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor{
@@ -307,7 +315,7 @@ pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f3
             .depth_load_op = .clear,
             .depth_store_op = .store,
         },
-    }).?;
+    }) orelse return Error.FailedToBeginRenderPass;
 
     render_pass.setPipeline(renderer.pipeline);
     render_pass.setVertexBuffer(0, renderer.point_buffer, 0, renderer.point_buffer.getSize());
@@ -326,7 +334,7 @@ pub fn renderFrame(renderer: Renderer, graphics: Graphics, mesh: *Mesh, time: f3
 
     const command = encoder.finish(&.{
         .label = "command buffer",
-    }).?;
+    }) orelse return Error.FailedToFinishEncoder;
     defer command.release();
 
     graphics.queue.submit(&[_]*const gpu.CommandBuffer{command});
@@ -344,7 +352,7 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
             .dimension = .@"2d",
             .mip_level_count = 1,
             .array_layer_count = 1,
-        }).?,
+        }) orelse Error.FailedToCreateView,
         else => {
             std.debug.print("Failed to get current texture: {}\n", .{surface_texture.status});
             return Error.FailedToGetCurrentTexture;
