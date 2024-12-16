@@ -8,6 +8,8 @@ const Graphics = @import("Graphics.zig");
 const Renderer = @import("Renderer.zig");
 const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
+const math = @import("math.zig");
+const Vec3 = math.Vec3;
 
 const Error = error{
     FailedToInitializeGLFW,
@@ -24,6 +26,8 @@ renderer: ?Renderer,
 width: u32,
 height: u32,
 camera: Camera,
+
+velocity: Velocity = .{},
 
 mesh: Mesh = .{
     .points = ([_]Mesh.Point{
@@ -81,6 +85,9 @@ pub fn init(allocator: std.mem.Allocator) !*App {
     }) orelse return Error.FailedToOpenWindow;
     errdefer app.window.destroy();
 
+    // close callback
+    app.window.setCloseCallback(onClose);
+
     // setup graphics
     app.graphics = try Graphics.init(app.mesh, app.window);
 
@@ -93,6 +100,9 @@ pub fn init(allocator: std.mem.Allocator) !*App {
 
     // setup renderer
     app.renderer = Renderer.init(app.mesh, app.graphics, app.width, app.height);
+
+    // input
+    app.window.setKeyCallback(onKeyInput);
 
     return app;
 }
@@ -110,6 +120,8 @@ pub fn run(self: *App) void {
 
     const time: f32 = @floatCast(glfw.getTime());
 
+    self.update();
+
     try self.renderer.?.renderFrame(self.graphics, &self.mesh, time, self.camera);
 
     self.graphics.surface.present();
@@ -117,12 +129,26 @@ pub fn run(self: *App) void {
     _ = self.graphics.device.poll(true, null);
 }
 
+fn update(self: *App) void {
+    if (@reduce(.Add, self.velocity.toVec3() * self.velocity.toVec3()) > 0) {
+        const movement_speed: Vec3 = @splat(0.1);
+
+        self.camera.moveRelative(self.velocity.toVec3() * movement_speed);
+    }
+}
+
 pub fn isRunning(self: *App) bool {
     return !glfw.Window.shouldClose(self.window);
 }
 
+fn onClose(window: glfw.Window) void {
+    const app = window.getUserPointer(App) orelse return;
+
+    app.deinit();
+}
+
 fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
-    const app: *App = window.getUserPointer(App) orelse return;
+    const app = window.getUserPointer(App) orelse return;
 
     app.width = width;
     app.height = height;
@@ -137,4 +163,93 @@ fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
     });
 
     if (app.renderer) |*renderer| renderer.updateScale(app.graphics.queue, width, height);
+}
+
+const Velocity = struct {
+    horizontal: enum { none, left, right } = .none,
+    vertical: enum { none, forward, backward } = .none,
+
+    pressed_w: bool = false,
+    pressed_a: bool = false,
+    pressed_s: bool = false,
+    pressed_d: bool = false,
+
+    pub fn update(self: *@This(), key: glfw.Key, action: glfw.Action) void {
+        const is_press = action == .press;
+        const is_release = action == .release;
+        switch (key) {
+            .a => if (is_press or is_release) {
+                self.pressed_a = is_press;
+                if (is_press) {
+                    self.horizontal = .left;
+                } else if (self.pressed_d) {
+                    self.horizontal = .right;
+                } else {
+                    self.horizontal = .none;
+                }
+            },
+            .d => if (is_press or is_release) {
+                self.pressed_d = is_press;
+                if (is_press) {
+                    self.horizontal = .right;
+                } else if (self.pressed_a) {
+                    self.horizontal = .left;
+                } else {
+                    self.horizontal = .none;
+                }
+            },
+            .w => if (is_press or is_release) {
+                self.pressed_w = is_press;
+                if (is_press) {
+                    self.vertical = .forward;
+                } else if (self.pressed_s) {
+                    self.vertical = .backward;
+                } else {
+                    self.vertical = .none;
+                }
+            },
+            .s => if (is_press or is_release) {
+                self.pressed_s = is_press;
+                if (is_press) {
+                    self.vertical = .backward;
+                } else if (self.pressed_w) {
+                    self.vertical = .forward;
+                } else {
+                    self.vertical = .none;
+                }
+            },
+            else => {},
+        }
+    }
+
+    pub fn toVec3(self: @This()) Vec3 {
+        return .{
+            switch (self.horizontal) {
+                .none => 0,
+                .left => -1,
+                .right => 1,
+            },
+            switch (self.vertical) {
+                .none => 0,
+                .forward => 1,
+                .backward => -1,
+            },
+            0,
+        };
+    }
+};
+
+fn onKeyInput(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
+    _ = scancode;
+    _ = mods;
+
+    const app = window.getUserPointer(App) orelse return;
+
+    if (key == .escape and action == .press) {
+        std.debug.print("closing...\n", .{});
+        window.setShouldClose(true);
+        return;
+    }
+
+    app.velocity.update(key, action);
 }
