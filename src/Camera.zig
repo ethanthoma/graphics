@@ -7,7 +7,7 @@ const Mat4x4 = math.Mat4x4;
 
 const Camera = @This();
 
-position: Vec3f = .{ 0, 0, 5 },
+position: Vec3f = .{ 0, 0, 16 },
 target: Vec3f = .{ 0, 0, 0 },
 up: Vec3f = .{ 0, 1, 0 },
 fov: f32 = 45.0 * std.math.pi / 180.0,

@@ -37,12 +37,11 @@ input: Input = .{},
 
 mesh: Mesh,
 
+chunks: std.AutoArrayHashMap(Vec3i, Mesh),
+
 pub fn init(allocator: std.mem.Allocator) !*App {
     var app = try allocator.create(App);
     errdefer allocator.destroy(app);
-
-    var chunk = Chunk.init();
-    const mesh = try chunk.generateMesh(allocator, .{ 0, 0, 0 });
 
     app.* = .{
         .allocator = allocator,
@@ -51,8 +50,48 @@ pub fn init(allocator: std.mem.Allocator) !*App {
         .renderer = null,
         .width = 640,
         .height = 480,
-        .mesh = mesh,
+        .mesh = undefined,
+        .chunks = std.AutoArrayHashMap(Vec3i, Mesh).init(allocator),
     };
+
+    // create merged mesh
+    for (0..3) |i| {
+        for (0..3) |j| {
+            const position = Vec3i{ @intCast(i), 0, @intCast(j) };
+            try app.chunks.put(position, try @constCast(&Chunk.init()).generateMesh(allocator, position));
+        }
+    }
+
+    var all_points = std.ArrayList(Mesh.Point).init(allocator);
+    defer all_points.deinit();
+    var all_indices = std.ArrayList(Mesh.Index).init(allocator);
+    defer all_indices.deinit();
+
+    var chunk_iter = app.chunks.iterator();
+    while (chunk_iter.next()) |entry| {
+        const mesh = entry.value_ptr;
+
+        const base_index: u16 = @intCast(all_points.items.len);
+
+        try all_points.appendSlice(mesh.points);
+
+        for (mesh.indices) |index| {
+            try all_indices.append(.{
+                index[0] + base_index,
+                index[1] + base_index,
+                index[2] + base_index,
+            });
+        }
+    }
+
+    const mesh = Mesh{
+        .points = try all_points.toOwnedSlice(),
+        .indices = try all_indices.toOwnedSlice(),
+        .instances = try allocator.dupe(Mesh.Instance, &[_]Mesh.Instance{Mesh.makeInstance(.{ 0, 0, 0 })}),
+        .uniform = .{},
+    };
+
+    app.mesh = mesh;
 
     // init glfw
     _ = glfw.init(.{}) or return Error.FailedToInitializeGLFW;

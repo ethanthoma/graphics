@@ -79,6 +79,19 @@ pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i)
         .{ -0.5, -0.5, 0.5 },
     };
 
+    const colors = [_]Vec3f{
+        .{ 0, 0.1, 0 },
+        .{ 0, 0.2, 0 },
+        .{ 0, 0.3, 0 },
+        .{ 0, 0.4, 0 },
+        .{ 0, 0.5, 0 },
+        .{ 0, 0.6, 0 },
+        .{ 0, 0.7, 0 },
+        .{ 0, 0.8, 0 },
+        .{ 0, 0.9, 0 },
+        .{ 0, 1.0, 0 },
+    };
+
     var points = std.ArrayList(Mesh.Point).init(allocator);
     var indices = std.ArrayList(Mesh.Index).init(allocator);
 
@@ -89,7 +102,7 @@ pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i)
 
                 const block_pos = position * @as(@Vector(3, i32), @splat(CHUNK_SIZE)) + @Vector(3, i32){ @intCast(x), @intCast(y), @intCast(z) };
 
-                const color: Vec3f = if ((x + z) / 2 % 2 == 0) .{ 0, 0.8, 0 } else .{ 0, 0.7, 0 };
+                const color = colors[@as(usize, @intCast(@reduce(.Add, position))) % colors.len];
 
                 try addFace(&points, &indices, block_pos, front_face, color);
                 try addFace(&points, &indices, block_pos, back_face, color);
