@@ -6,7 +6,7 @@ const Vec3f = math.Vec3(f32);
 const Vec3i = math.Vec3(i32);
 const Mat4x4 = math.Mat4x4;
 
-const CHUNK_SIZE = 5;
+pub const CHUNK_SIZE = 5;
 
 const Block = enum {
     air,

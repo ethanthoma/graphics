@@ -7,8 +7,7 @@ const Mat4x4 = math.Mat4x4;
 
 const Camera = @This();
 
-position: Vec3f = .{ 0, 0, 16 },
-target: Vec3f = .{ 0, 0, 0 },
+position: Vec3f = .{ 0, 5, 0 },
 up: Vec3f = .{ 0, 1, 0 },
 fov: f32 = 45.0 * std.math.pi / 180.0,
 aspect: f32 = 16 / 9,
@@ -18,15 +17,15 @@ yaw: f32 = -90.0,
 pitch: f32 = 0.0,
 
 pub fn getViewMatrix(self: Camera) Mat4x4 {
-    const f = math.normalize(self.target - self.position);
-    const s = math.normalize(math.cross(f, self.up));
-    const u = math.cross(s, f);
+    const front = self.getFront();
+    const s = math.normalize(math.cross(front, self.up));
+    const u = math.cross(s, front);
 
     return .{
-        s[0],                        u[0],                        -f[0],                      0.0,
-        s[1],                        u[1],                        -f[1],                      0.0,
-        s[2],                        u[2],                        -f[2],                      0.0,
-        -math.dot(s, self.position), -math.dot(u, self.position), math.dot(f, self.position), 1.0,
+        s[0],                        u[0],                        -front[0],                      0.0,
+        s[1],                        u[1],                        -front[1],                      0.0,
+        s[2],                        u[2],                        -front[2],                      0.0,
+        -math.dot(s, self.position), -math.dot(u, self.position), math.dot(front, self.position), 1.0,
     };
 }
 
@@ -42,32 +41,40 @@ pub fn getProjectionMatrix(self: Camera) Mat4x4 {
 }
 
 pub fn moveRelative(self: *Camera, velocity: Vec3f) void {
-    const forward = math.normalize(self.target - self.position);
-    const right = math.normalize(math.cross(forward, self.up));
+    const front = self.getFront();
+    const right = math.normalize(math.cross(front, self.up));
 
     const planar_movement = Vec3f{
-        right[0] * velocity[0] + forward[0] * velocity[2],
-        right[1] * velocity[0] + forward[1] * velocity[2],
-        right[2] * velocity[0] + forward[2] * velocity[2],
+        right[0] * velocity[0] + front[0] * velocity[2],
+        right[1] * velocity[0] + front[1] * velocity[2],
+        right[2] * velocity[0] + front[2] * velocity[2],
     };
 
     const movement = planar_movement + Vec3f{ 0, velocity[1], 0 };
-
     self.position += movement;
-    self.target += movement;
+}
+
+pub fn getFront(self: Camera) Vec3f {
+    return .{
+        @cos(self.yaw * std.math.pi / 180.0) * @cos(self.pitch * std.math.pi / 180.0),
+        @sin(self.pitch * std.math.pi / 180.0),
+        @sin(self.yaw * std.math.pi / 180.0) * @cos(self.pitch * std.math.pi / 180.0),
+    };
 }
 
 pub fn rotate(self: *Camera, rotation: Vec2f) void {
     self.yaw += rotation[0];
     self.pitch += rotation[1];
+    self.pitch = std.math.clamp(self.pitch, -89.0, 89.0);
+}
+
+pub fn lookAt(self: *Camera, target: Vec3f) void {
+    const direction = target - self.position;
+
+    const length = @sqrt(direction[0] * direction[0] + direction[2] * direction[2]);
+    self.pitch = std.math.atan2(direction[1], length) * 180.0 / std.math.pi;
+
+    self.yaw = std.math.atan2(direction[2], direction[0]) * 180.0 / std.math.pi;
 
     self.pitch = std.math.clamp(self.pitch, -89.0, 89.0);
-
-    const direction = Vec3f{
-        @cos(self.yaw * std.math.pi / 180.0) * @cos(self.pitch * std.math.pi / 180.0),
-        @sin(self.pitch * std.math.pi / 180.0),
-        @sin(self.yaw * std.math.pi / 180.0) * @cos(self.pitch * std.math.pi / 180.0),
-    };
-
-    self.target = self.position + direction;
 }

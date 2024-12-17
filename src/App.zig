@@ -55,12 +55,20 @@ pub fn init(allocator: std.mem.Allocator) !*App {
     };
 
     // create merged mesh
-    for (0..3) |i| {
-        for (0..3) |j| {
+    const W = 3;
+    const L = 3;
+    for (0..W) |i| {
+        for (0..L) |j| {
             const position = Vec3i{ @intCast(i), 0, @intCast(j) };
             try app.chunks.put(position, try @constCast(&Chunk.init()).generateMesh(allocator, position));
         }
     }
+
+    app.camera.lookAt(.{
+        @as(f32, @floatFromInt(Chunk.CHUNK_SIZE * W)) / 2,
+        0,
+        @as(f32, @floatFromInt(Chunk.CHUNK_SIZE * L)) / 2,
+    });
 
     var all_points = std.ArrayList(Mesh.Point).init(allocator);
     defer all_points.deinit();
@@ -124,6 +132,8 @@ pub fn init(allocator: std.mem.Allocator) !*App {
     app.window.setKeyCallback(onKeyInput);
     app.window.setCursorPosCallback(onMouseInput);
     app.window.setInputMode(.cursor, .disabled);
+    const cursor_position = app.window.getCursorPos();
+    app.input.mouse_position = .{ cursor_position.xpos, cursor_position.ypos };
 
     return app;
 }
