@@ -2,10 +2,11 @@ const std = @import("std");
 
 const Mesh = @import("Mesh.zig");
 const math = @import("math.zig");
-const Vec3 = math.Vec3;
+const Vec3f = math.Vec3(f32);
+const Vec3i = math.Vec3(i32);
 const Mat4x4 = math.Mat4x4;
 
-const CHUNK_SIZE = 2;
+const CHUNK_SIZE = 5;
 
 const Block = enum {
     air,
@@ -40,38 +41,38 @@ fn generateChunk(self: *Chunk) void {
     }
 }
 
-pub fn generateMesh(self: *Chunk, position: @Vector(3, i32), allocator: std.mem.Allocator) !Mesh {
-    const front_face = &[_]Vec3{
+pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i) !Mesh {
+    const front_face = &[_]Vec3f{
         .{ -0.5, -0.5, 0.5 },
         .{ 0.5, -0.5, 0.5 },
         .{ 0.5, 0.5, 0.5 },
         .{ -0.5, 0.5, 0.5 },
     };
-    const back_face = &[_]Vec3{
+    const back_face = &[_]Vec3f{
         .{ 0.5, -0.5, -0.5 },
         .{ -0.5, -0.5, -0.5 },
         .{ -0.5, 0.5, -0.5 },
         .{ 0.5, 0.5, -0.5 },
     };
-    const right_face = &[_]Vec3{
+    const right_face = &[_]Vec3f{
         .{ 0.5, -0.5, 0.5 },
         .{ 0.5, -0.5, -0.5 },
         .{ 0.5, 0.5, -0.5 },
         .{ 0.5, 0.5, 0.5 },
     };
-    const left_face = &[_]Vec3{
+    const left_face = &[_]Vec3f{
         .{ -0.5, -0.5, -0.5 },
         .{ -0.5, -0.5, 0.5 },
         .{ -0.5, 0.5, 0.5 },
         .{ -0.5, 0.5, -0.5 },
     };
-    const top_face = &[_]Vec3{
+    const top_face = &[_]Vec3f{
         .{ -0.5, 0.5, 0.5 },
         .{ 0.5, 0.5, 0.5 },
         .{ 0.5, 0.5, -0.5 },
         .{ -0.5, 0.5, -0.5 },
     };
-    const bottom_face = &[_]Vec3{
+    const bottom_face = &[_]Vec3f{
         .{ -0.5, -0.5, -0.5 },
         .{ 0.5, -0.5, -0.5 },
         .{ 0.5, -0.5, 0.5 },
@@ -88,7 +89,7 @@ pub fn generateMesh(self: *Chunk, position: @Vector(3, i32), allocator: std.mem.
 
                 const block_pos = position * @as(@Vector(3, i32), @splat(CHUNK_SIZE)) + @Vector(3, i32){ @intCast(x), @intCast(y), @intCast(z) };
 
-                const color = Vec3{ 0, 0.8, 0 };
+                const color: Vec3f = if ((x + z) / 2 % 2 == 0) .{ 0, 0.8, 0 } else .{ 0, 0.7, 0 };
 
                 try addFace(&points, &indices, block_pos, front_face, color);
                 try addFace(&points, &indices, block_pos, back_face, color);
@@ -113,12 +114,12 @@ pub fn generateMesh(self: *Chunk, position: @Vector(3, i32), allocator: std.mem.
     };
 }
 
-fn addFace(points: *std.ArrayList(Mesh.Point), indices: *std.ArrayList(Mesh.Index), position: @Vector(3, i32), face_vertices: []const Vec3, color: Vec3) !void {
+fn addFace(points: *std.ArrayList(Mesh.Point), indices: *std.ArrayList(Mesh.Index), position: Vec3i, face_vertices: []const Vec3f, color: Vec3f) !void {
     const base_index: u16 = @truncate(points.items.len);
 
     for (face_vertices) |vertex| {
         const point = Mesh.Point{
-            .position = @as(@Vector(3, f32), @floatFromInt(position)) + vertex,
+            .position = @as(Vec3f, @floatFromInt(position)) + vertex,
             .color = color,
         };
 

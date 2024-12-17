@@ -9,7 +9,8 @@ const Renderer = @import("Renderer.zig");
 const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
 const math = @import("math.zig");
-const Vec3 = math.Vec3;
+const Vec3f = math.Vec3(f32);
+const Vec3i = math.Vec3(i32);
 const Chunk = @import("Chunk.zig");
 const Input = @import("Input.zig");
 
@@ -19,6 +20,9 @@ const Error = error{
 };
 
 const App = @This();
+
+const MOVEMENT_SPEED: f32 = 0.1;
+const MOUSE_SENSITIVITY: f32 = 0.07;
 
 allocator: std.mem.Allocator,
 window: glfw.Window,
@@ -38,7 +42,7 @@ pub fn init(allocator: std.mem.Allocator) !*App {
     errdefer allocator.destroy(app);
 
     var chunk = Chunk.init();
-    const chunk_mesh = try chunk.generateMesh(.{ 0, 0, 0 }, allocator);
+    const mesh = try chunk.generateMesh(allocator, .{ 0, 0, 0 });
 
     app.* = .{
         .allocator = allocator,
@@ -47,7 +51,7 @@ pub fn init(allocator: std.mem.Allocator) !*App {
         .renderer = null,
         .width = 640,
         .height = 480,
-        .mesh = chunk_mesh,
+        .mesh = mesh,
     };
 
     // init glfw
@@ -79,6 +83,9 @@ pub fn init(allocator: std.mem.Allocator) !*App {
 
     // input
     app.window.setKeyCallback(onKeyInput);
+    app.window.setCursorPosCallback(onMouseInput);
+    app.window.setInputMode(.cursor, .disabled);
+
     return app;
 }
 
@@ -105,21 +112,23 @@ pub fn run(self: *App) !void {
 }
 
 fn update(self: *App) void {
-    if (@reduce(.Add, self.input.toVec3() * self.input.toVec3()) > 0) {
-        const movement_speed: Vec3 = @splat(0.1);
+    const movement = self.input.toVec3();
+    if (@reduce(.Add, movement * movement) > 0) {
+        self.camera.moveRelative(movement * @as(@TypeOf(movement), @splat(MOVEMENT_SPEED)));
+    }
 
-        self.camera.moveRelative(self.input.toVec3() * movement_speed);
+    const rotation = self.input.mouse_delta;
+    if (@reduce(.Add, rotation * rotation) > 0) {
+        self.camera.rotate(rotation * @as(@TypeOf(rotation), @splat(MOUSE_SENSITIVITY)));
+        self.input.mouse_delta = @splat(0);
     }
 }
-
 pub fn isRunning(self: *App) bool {
     return !glfw.Window.shouldClose(self.window);
 }
 
 fn onClose(window: glfw.Window) void {
-    const app = window.getUserPointer(App) orelse return;
-
-    app.deinit();
+    _ = window;
 }
 
 fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
@@ -154,5 +163,10 @@ fn onKeyInput(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Ac
         return;
     }
 
-    app.input.update(key, action);
+    app.input.updateKey(key, action);
+}
+
+fn onMouseInput(window: glfw.Window, position_x: f64, position_y: f64) void {
+    const app = window.getUserPointer(App) orelse return;
+    app.input.updateMouse(position_x, position_y);
 }

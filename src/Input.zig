@@ -1,7 +1,9 @@
 const glfw = @import("mach-glfw");
 
 const math = @import("math.zig");
-const Vec3 = math.Vec3;
+const Vec3f = math.Vec3(f32);
+const Vec2fd = @Vector(2, f64);
+const Vec2f = @Vector(2, f32);
 
 const Input = @This();
 
@@ -16,9 +18,14 @@ pressed_d: bool = false,
 pressed_space: bool = false,
 pressed_shift: bool = false,
 
-pub fn update(self: *@This(), key: glfw.Key, action: glfw.Action) void {
+mouse_position: Vec2fd = @splat(0),
+mouse_delta: Vec2f = @splat(0),
+is_mouse_captured: bool = false,
+
+pub fn updateKey(self: *@This(), key: glfw.Key, action: glfw.Action) void {
     const is_press = action == .press;
     const is_release = action == .release;
+
     switch (key) {
         .a => if (is_press or is_release) {
             self.pressed_a = is_press;
@@ -84,7 +91,7 @@ pub fn update(self: *@This(), key: glfw.Key, action: glfw.Action) void {
     }
 }
 
-pub fn toVec3(self: @This()) Vec3 {
+pub fn toVec3(self: @This()) Vec3f {
     return .{
         switch (self.horizontal) {
             .none => 0,
@@ -102,4 +109,13 @@ pub fn toVec3(self: @This()) Vec3 {
             .backward => -1,
         },
     };
+}
+
+pub fn updateMouse(self: *@This(), position_x: f64, position_y: f64) void {
+    const dx = position_x - self.mouse_position[0];
+    const dy = self.mouse_position[1] - position_y;
+
+    self.mouse_delta = @floatCast(Vec2fd{ dx, dy });
+
+    self.mouse_position = .{ position_x, position_y };
 }

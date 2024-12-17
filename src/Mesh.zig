@@ -1,7 +1,7 @@
 const std = @import("std");
 
 const math = @import("math.zig");
-const Vec3 = math.Vec3;
+const Vec3f = math.Vec3(f32);
 const Mat4x4 = math.Mat4x4;
 
 const Mesh = @This();
@@ -10,8 +10,8 @@ pub const Point = extern struct {
     position: Position,
     color: Color,
 
-    pub const Position = Vec3;
-    pub const Color = Vec3;
+    pub const Position = Vec3f;
+    pub const Color = Vec3f;
 };
 
 pub const Index = [3]u16;
@@ -29,7 +29,7 @@ indices: []const Index,
 instances: []const Instance,
 uniform: Uniform,
 
-pub fn makeInstance(position: Vec3) Instance {
+pub fn makeInstance(position: Vec3f) Instance {
     return math.Mat4x4{
         1,           0,           0,           0,
         0,           1,           0,           0,

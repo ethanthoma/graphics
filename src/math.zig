@@ -1,12 +1,21 @@
-pub const Vec3 = @Vector(3, f32);
+const comptimePrint = @import("std").fmt.comptimePrint;
+
 pub const Mat4x4 = @Vector(16, f32);
 
-pub fn normalize(v: Vec3) Vec3 {
-    return v / @as(Vec3, @splat(@sqrt(@reduce(.Add, v * v))));
+pub fn Vec2(comptime T: type) type {
+    return @Vector(2, T);
+}
+
+pub fn Vec3(comptime T: type) type {
+    return @Vector(3, T);
+}
+
+pub fn normalize(v: Vec3(f32)) Vec3(f32) {
+    return v / @as(Vec3(f32), @splat(@sqrt(@reduce(.Add, v * v))));
 }
 
 // https://geometrian.com/programming/tutorials/cross-product/index.php
-pub fn cross(a: Vec3, b: Vec3) Vec3 {
+pub fn cross(a: Vec3(f32), b: @TypeOf(a)) @TypeOf(a) {
     const tmp0 = @shuffle(f32, a, undefined, @Vector(3, i8){ 1, 2, 0 });
     const tmp1 = @shuffle(f32, b, undefined, @Vector(3, i8){ 2, 0, 1 });
     const tmp2 = tmp0 * b;
@@ -16,6 +25,6 @@ pub fn cross(a: Vec3, b: Vec3) Vec3 {
     return tmp3 - tmp4;
 }
 
-pub fn dot(a: Vec3, b: Vec3) f32 {
+pub fn dot(a: Vec3(f32), b: Vec3(f32)) f32 {
     return @reduce(.Add, a * b);
 }
