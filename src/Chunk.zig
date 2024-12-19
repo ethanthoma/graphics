@@ -93,7 +93,9 @@ pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i)
     };
 
     var points = std.ArrayList(Mesh.Point).init(allocator);
+    defer points.deinit();
     var indices = std.ArrayList(Mesh.Index).init(allocator);
+    defer indices.deinit();
 
     for (0..CHUNK_SIZE) |x| {
         for (0..CHUNK_SIZE) |y| {

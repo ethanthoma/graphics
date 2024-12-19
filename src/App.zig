@@ -21,7 +21,7 @@ const Error = error{
 
 const App = @This();
 
-const MOVEMENT_SPEED: f32 = 0.1;
+const MOVEMENT_SPEED: f32 = 0.2;
 const MOUSE_SENSITIVITY: f32 = 0.07;
 
 allocator: std.mem.Allocator,

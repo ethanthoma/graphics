@@ -54,10 +54,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let tex_size = textureDimensions(texture); // 256 x 256
     let pos = modf(in.block_position).fract;
 
+    let EPSILON = 0.00001;
+
     var tex_coords: vec2f;
-    if pos.x == 0.0 || pos.x == 1.0 {
+    if pos.x <= EPSILON || pos.x >= 1.0 - EPSILON {
         tex_coords = pos.yz;
-    } else if pos.y == 0.0 || pos.y == 1.0 {
+    } else if pos.y <= EPSILON || pos.y >= 1.0 - EPSILON {
         tex_coords = pos.xz;
     } else {
         tex_coords = pos.xy;
@@ -65,7 +67,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 
     let mapped_coords = vec2i(tex_coords * vec2f(tex_size - 1u));
 
-    let color = textureLoad(texture, mapped_coords, 0).rgb;
+    let color = textureLoad(texture, mapped_coords, 0).rgb * in.color.rgb;
     let linear_color = pow(color, vec3f(2.2));
-    return vec4f(linear_color, in.color.g);
+    return vec4f(linear_color, 1.0);
 }
