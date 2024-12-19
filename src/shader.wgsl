@@ -13,6 +13,7 @@ struct InstanceInput {
 struct VertexOutput {
     @builtin(position) position: vec4f,
     @location(0) color: vec3f,
+    @location(1) block_position: vec3f,
 };
 
 struct Camera {
@@ -21,6 +22,7 @@ struct Camera {
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
+@group(0) @binding(1) var texture: texture_2d<f32>;
 
 @vertex
 fn vs_main(
@@ -42,11 +44,28 @@ fn vs_main(
 
     out.color = in.color;
 
-	return out;
+    out.block_position = in.position;
+
+    return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-	let linear_color = pow(in.color, vec3f(2.2));
-	return vec4f(linear_color, 1.0);
+    let tex_size = textureDimensions(texture); // 256 x 256
+    let pos = modf(in.block_position).fract;
+
+    var tex_coords: vec2f;
+    if pos.x == 0.0 || pos.x == 1.0 {
+        tex_coords = pos.yz;
+    } else if pos.y == 0.0 || pos.y == 1.0 {
+        tex_coords = pos.xz;
+    } else {
+        tex_coords = pos.xy;
+    }
+
+    let mapped_coords = vec2i(tex_coords * vec2f(tex_size - 1u));
+
+    let color = textureLoad(texture, mapped_coords, 0).rgb;
+    let linear_color = pow(color, vec3f(2.2));
+    return vec4f(linear_color, in.color.g);
 }

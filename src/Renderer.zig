@@ -250,13 +250,12 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
 
 fn initDepth(self: *Renderer, graphics: Graphics) !void {
     self.depth_texture = graphics.device.createTexture(&.{
+        .usage = gpu.TextureUsage.render_attachment,
         .size = .{
             .width = self.width,
             .height = self.height,
-            .depth_or_array_layers = 1,
         },
         .format = .depth24_plus,
-        .usage = gpu.TextureUsage.render_attachment,
     }) orelse return Error.FailedToCreateTexture;
 
     self.depth_view = self.depth_texture.createView(&.{

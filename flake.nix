@@ -2,11 +2,15 @@
   description = "Zig project flake";
 
   inputs = {
-    zig2nix.url = "github:Cloudef/zig2nix";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    zig2nix = {
+      inputs.nixpkgs.follows = "nixpkgs";
+      url = "github:Cloudef/zig2nix";
+    };
   };
 
   outputs =
-    { zig2nix, ... }:
+    { nixpkgs, zig2nix, ... }:
     let
       flake-utils = zig2nix.inputs.flake-utils;
     in
@@ -21,6 +25,8 @@
         };
 
         system-triple = env.lib.zigTripleFromString system;
+
+        pkgs = nixpkgs.legacyPackages.${system};
       in
       with builtins;
       with env.lib;
@@ -64,7 +70,8 @@
         devShells.default = env.mkShell {
           packages = [
             zig2nix.outputs.packages.${system}.zon2nix
-            env.pkgs.zls
+            pkgs.zls
+            pkgs.wgsl-analyzer
           ];
         };
       }

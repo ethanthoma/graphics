@@ -7,6 +7,8 @@ const Self = @This();
 
 const Error = error{
     FailedToCreateBuffer,
+    FailedToCreateTexture,
+    FailedToCreateView,
     FailedToCreateBindGroupLayout,
     FailedToCreateBindGroup,
 };
@@ -16,8 +18,11 @@ mesh: Mesh,
 index_buffer: *gpu.Buffer,
 point_buffer: *gpu.Buffer,
 instance_buffer: *gpu.Buffer,
-
 uniform_buffer: *gpu.Buffer,
+
+texture: *gpu.Texture,
+texture_view: *gpu.TextureView,
+
 bind_group_layout: *gpu.BindGroupLayout,
 bind_group: *gpu.BindGroup,
 
@@ -29,8 +34,10 @@ pub fn init(mesh: Mesh, graphics: Graphics) !Self {
     try initIndexBuffer(&self, graphics);
     try initPointBuffer(&self, graphics);
     try initInstanceBuffer(&self, graphics);
-
     try initUniformBuffer(&self, graphics);
+
+    try initTexture(&self, graphics);
+
     try initBindGroupLayout(&self, graphics);
     try initBindGroup(&self, graphics);
 
@@ -46,6 +53,10 @@ pub fn deinit(self: *const Self) void {
     self.point_buffer.release();
     self.index_buffer.destroy();
     self.index_buffer.release();
+
+    self.texture_view.release();
+    self.texture.destroy();
+    self.texture.release();
 
     self.bind_group_layout.release();
 }
@@ -125,7 +136,7 @@ fn initInstanceBuffer(self: *Self, graphics: Graphics) !void {
 }
 
 fn initBindGroupLayout(self: *Self, graphics: Graphics) !void {
-    const entries = &[_]gpu.BindGroupLayoutEntry{.{
+    const entries = &[_]gpu.BindGroupLayoutEntry{ .{
         .binding = 0,
         .visibility = gpu.ShaderStage.vertex | gpu.ShaderStage.fragment,
         .buffer = .{
@@ -135,7 +146,16 @@ fn initBindGroupLayout(self: *Self, graphics: Graphics) !void {
         .sampler = .{},
         .texture = .{},
         .storage_texture = .{},
-    }};
+    }, .{
+        .binding = 1,
+        .visibility = gpu.ShaderStage.fragment,
+        .buffer = .{},
+        .sampler = .{},
+        .texture = .{
+            .sample_type = .float,
+        },
+        .storage_texture = .{},
+    } };
 
     self.bind_group_layout = graphics.device.createBindGroupLayout(&.{
         .label = "my bind group",
@@ -145,11 +165,11 @@ fn initBindGroupLayout(self: *Self, graphics: Graphics) !void {
 }
 
 fn initBindGroup(self: *Self, graphics: Graphics) !void {
-    const entries = &[_]gpu.BindGroupEntry{.{
+    const entries = &[_]gpu.BindGroupEntry{ .{
         .binding = 0,
         .buffer = self.uniform_buffer,
         .size = @sizeOf(Mesh.Uniform),
-    }};
+    }, .{ .binding = 1, .texture_view = self.texture_view } };
 
     self.bind_group = graphics.device.createBindGroup(&.{
         .label = "bind group",
@@ -157,4 +177,54 @@ fn initBindGroup(self: *Self, graphics: Graphics) !void {
         .entry_count = entries.len,
         .entries = entries.ptr,
     }) orelse return Error.FailedToCreateBindGroup;
+}
+
+fn initTexture(self: *Self, graphics: Graphics) !void {
+    const width = 256;
+    const height = 256;
+    const border = 3;
+
+    self.texture = graphics.device.createTexture(&.{
+        .usage = gpu.TextureUsage.texture_binding | gpu.TextureUsage.copy_dst,
+        .size = .{
+            .width = width,
+            .height = height,
+        },
+        .format = .rgba8_unorm,
+        .mip_level_count = 1,
+        .sample_count = 1,
+    }) orelse return Error.FailedToCreateTexture;
+
+    self.texture_view = self.texture.createView(&.{
+        .format = .rgba8_unorm,
+        .dimension = .@"2d",
+        .array_layer_count = 1,
+        .mip_level_count = 1,
+    }) orelse return Error.FailedToCreateView;
+
+    var pixels: [width * height * 4]u8 = undefined;
+    for (0..height) |y| {
+        for (0..width) |x| {
+            const color: *[4]u8 = @ptrCast(&pixels[(y * height + x) * 4]);
+
+            color.* = .{
+                0,
+                192,
+                0,
+                255,
+            };
+
+            if (x < border or x >= width - border or y < border or y >= height - border) {
+                color.* = .{ 0, 0, 0, 255 };
+            }
+        }
+    }
+
+    graphics.queue.writeTexture(
+        &.{ .texture = self.texture, .origin = .{} },
+        (&pixels).ptr,
+        (&pixels).len,
+        &.{ .bytes_per_row = 4 * width, .rows_per_image = height },
+        &.{ .width = width, .height = height },
+    );
 }
