@@ -153,7 +153,7 @@ pub fn run(self: *App) !void {
 
     self.update();
 
-    try self.renderer.?.renderFrame(self.graphics, &self.mesh, time, self.camera);
+    try self.renderer.?.render(self.graphics, &self.mesh, time, self.camera);
 
     self.graphics.surface.present();
 
@@ -197,7 +197,7 @@ fn onWindowResize(window: glfw.Window, width: u32, height: u32) void {
 
     app.camera.aspect = @as(f32, @floatFromInt(width)) / @as(f32, @floatFromInt(height));
 
-    if (app.renderer) |*renderer| renderer.updateScale(app.graphics.queue, width, height);
+    if (app.renderer) |*renderer| renderer.updateScale(app.graphics, width, height) catch {};
 }
 
 fn onKeyInput(window: glfw.Window, key: glfw.Key, scancode: i32, action: glfw.Action, mods: glfw.Mods) void {
