@@ -1,1 +1,6 @@
-pub const BufferTypeClass = enum { vertex, instance, index };
+pub const BufferTypeClass = enum {
+    vertex,
+    instance,
+    index,
+    uniform,
+};

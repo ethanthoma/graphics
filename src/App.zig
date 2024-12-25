@@ -153,7 +153,7 @@ pub fn run(self: *App) !void {
 
     self.update();
 
-    try self.renderer.?.render(self.graphics, &self.mesh, time, self.camera);
+    try self.renderer.?.render(self.graphics, time, self.camera);
 
     self.graphics.surface.present();
 

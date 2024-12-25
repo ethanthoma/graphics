@@ -9,7 +9,7 @@ const math = @import("math.zig");
 const Mat4x4 = math.Mat4x4;
 const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
-const Shader = @import("shader.zig").Shader(&[_]type{ Mesh.Point, Mesh.Instance, Mesh.Index });
+const Shader = @import("shader.zig").Shader(&ShaderTypes);
 const DataType = math.DataType;
 const BufferTypeClass = @import("buffer.zig").BufferTypeClass;
 
@@ -26,6 +26,8 @@ const Error = error{
     FailedToBeginRenderPass,
     FailedToFinishEncoder,
 };
+
+const ShaderTypes = [_]type{ Mesh.Point, Mesh.Instance, Mesh.Index, Mesh.Uniform };
 
 pipeline: *gpu.RenderPipeline,
 layout: *gpu.PipelineLayout,
@@ -82,6 +84,15 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
 
     self.shader = try Shader.init(mesh, graphics);
 
+    try self.shader.addBuffer(graphics, mesh.points);
+    try self.shader.addBuffer(graphics, mesh.instances);
+    try self.shader.addBuffer(graphics, mesh.indices);
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    try self.shader.addUniform(allocator, graphics, mesh.uniform);
+
     const bind_group_layouts = &[_]*const gpu.BindGroupLayout{self.shader.bind_group_layout};
 
     self.layout = graphics.device.createPipelineLayout(&.{
@@ -120,25 +131,12 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
     return self;
 }
 
-pub fn render(self: Renderer, graphics: Graphics, mesh: *Mesh, time: f32, camera: Camera) !void {
+pub fn render(self: Renderer, graphics: Graphics, time: f32, camera: Camera) !void {
     _ = time;
 
     // update camera
-    mesh.uniform.projection = camera.getProjectionMatrix();
-    graphics.queue.writeBuffer(
-        self.shader.uniform_buffer,
-        @offsetOf(Mesh.Uniform, "projection"),
-        &mesh.uniform.projection,
-        @sizeOf(@TypeOf(mesh.uniform.projection)),
-    );
-
-    mesh.uniform.view = camera.getViewMatrix();
-    graphics.queue.writeBuffer(
-        self.shader.uniform_buffer,
-        @offsetOf(Mesh.Uniform, "view"),
-        &mesh.uniform.view,
-        @sizeOf(@TypeOf(mesh.uniform.view)),
-    );
+    self.shader.update(graphics, Mesh.Uniform, .projection, camera.getProjectionMatrix());
+    self.shader.update(graphics, Mesh.Uniform, .view, camera.getViewMatrix());
 
     // setup target view
     const next_texture = getCurrentTextureView(graphics.surface) catch return;
@@ -363,7 +361,7 @@ fn getVertexBufferLayoutCount(comptime Vertexs: []const type) comptime_int {
     for (Vertexs) |Vertex| {
         vertex_length += switch (Vertex.buffer_type) {
             .vertex, .instance => 1,
-            .index => 0,
+            .index, .uniform => 0,
         };
     }
     return vertex_length;

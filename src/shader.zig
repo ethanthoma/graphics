@@ -15,13 +15,125 @@ const Error = error{
 };
 
 pub fn Shader(BufferTypes: []const type) type {
+    const uniformCount = blk: {
+        var count = 0;
+        break :blk inline for (BufferTypes) |BufferType| switch (BufferType.buffer_type) {
+            .uniform => count += 1,
+            else => {},
+        } else count;
+    };
+
+    const textureCount = 1;
+
     return struct {
         const Self = @This();
+
+        pub usingnamespace for (BufferTypes) |BufferType| {
+            switch (BufferType.buffer_type) {
+                .uniform => break struct {
+                    fn UniformType(index: usize) type {
+                        var local_index = 0;
+                        inline for (BufferTypes) |_BufferType| {
+                            switch (_BufferType.buffer_type) {
+                                .uniform => {
+                                    if (index == local_index) return _BufferType;
+                                    local_index += 1;
+                                },
+                                else => {},
+                            }
+                        } else @compileError("Passed in index out of bounds");
+                    }
+
+                    fn getUniformIndex(Uniform: type) comptime_int {
+                        comptime var index = 0;
+                        inline for (BufferTypes) |_BufferType| {
+                            switch (_BufferType.buffer_type) {
+                                .uniform => {
+                                    if (Uniform == _BufferType) break;
+                                    index += 1;
+                                },
+                                else => {},
+                            }
+                        } else @compileError(std.fmt.comptimePrint(
+                            "Passed in Uniform data {} doesn't match BufferTypes",
+                            .{Uniform},
+                        ));
+                        return index;
+                    }
+
+                    pub fn addUniform(self: *Self, allocator: std.mem.Allocator, graphics: Graphics, data: anytype) !void {
+                        const index = getUniformIndex(@TypeOf(data));
+
+                        const uniform = try allocator.create(@TypeOf(data));
+                        uniform.* = data;
+
+                        self.uniforms[index] = uniform;
+
+                        const buffer_index = inline for (BufferTypes, 0..) |_BufferType, i|
+                            if (_BufferType == @TypeOf(data)) break i;
+
+                        const Uniform = @TypeOf(data);
+
+                        const buffer = graphics.device.createBuffer(&.{
+                            .label = std.fmt.comptimePrint("uniform {} buffer", .{Uniform}),
+                            .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.uniform,
+                            .size = @sizeOf(Uniform),
+                        }) orelse return Error.FailedToCreateBuffer;
+
+                        self.buffers[buffer_index] = buffer;
+
+                        graphics.queue.writeBuffer(
+                            buffer,
+                            0,
+                            self.uniforms[index],
+                            @sizeOf(Uniform),
+                        );
+
+                        self.bind_group_entries[index] = .{
+                            .binding = Uniform.binding,
+                            .buffer = buffer,
+                            .size = @sizeOf(Uniform),
+                        };
+
+                        _ = try tryInitBindGroup(self, graphics);
+                    }
+
+                    pub fn update(
+                        self: *const Self,
+                        graphics: Graphics,
+                        Uniform: type,
+                        comptime field_tag: std.meta.FieldEnum(Uniform),
+                        data: std.meta.fieldInfo(Uniform, field_tag).type,
+                    ) void {
+                        const index = getUniformIndex(Uniform);
+                        const buffer_index = inline for (BufferTypes, 0..) |_BufferType, i|
+                            if (_BufferType == Uniform) break i;
+
+                        const uniform: *Uniform = @alignCast(@ptrCast(self.uniforms[index]));
+
+                        const field_name = @tagName(field_tag);
+                        const field = &@field(uniform, field_name);
+
+                        field.* = data;
+
+                        graphics.queue.writeBuffer(
+                            self.buffers[buffer_index].?,
+                            @offsetOf(Uniform, field_name),
+                            field,
+                            @sizeOf(std.meta.fieldInfo(Uniform, field_tag).type),
+                        );
+                    }
+                },
+                else => {},
+            }
+        } else struct {};
 
         mesh: Mesh,
         buffers: [BufferTypes.len]?*gpu.Buffer = .{null} ** BufferTypes.len,
 
-        uniform_buffer: *gpu.Buffer,
+        uniforms: [uniformCount]*anyopaque = undefined,
+
+        bind_group_entries: [uniformCount + textureCount]?gpu.BindGroupEntry = undefined,
 
         texture: *gpu.Texture,
         texture_view: *gpu.TextureView,
@@ -34,19 +146,33 @@ pub fn Shader(BufferTypes: []const type) type {
 
             self.buffers = .{null} ** BufferTypes.len;
 
-            self.mesh = mesh;
-
-            try addBuffer(&self, graphics, mesh.points);
-            try addBuffer(&self, graphics, mesh.instances);
-            try addBuffer(&self, graphics, mesh.indices);
-
-            try initUniformBuffer(&self, graphics);
             try initTexture(&self, graphics);
 
+            self.bind_group_entries = .{null} ** (uniformCount + textureCount);
+            self.bind_group_entries[uniformCount] = .{ .binding = 1, .texture_view = self.texture_view };
+
+            self.mesh = mesh;
+
             try initBindGroupLayout(&self, graphics);
-            try initBindGroup(&self, graphics);
 
             return self;
+        }
+
+        fn tryInitBindGroup(self: *Self, graphics: Graphics) !bool {
+            const retval = for (self.bind_group_entries) |entry| {
+                if (entry) |_| {} else break false;
+            } else true;
+
+            if (retval) {
+                const entries = &blk: {
+                    var entries: [uniformCount + textureCount]gpu.BindGroupEntry = undefined;
+                    for (self.bind_group_entries, &entries) |from, *to| to.* = from.?;
+                    break :blk entries;
+                };
+                try self.initBindGroup(graphics, entries);
+            }
+
+            return retval;
         }
 
         pub fn deinit(self: *const Self) void {
@@ -58,9 +184,6 @@ pub fn Shader(BufferTypes: []const type) type {
                     buffer.release();
                 }
             }
-
-            self.uniform_buffer.destroy();
-            self.uniform_buffer.release();
 
             self.texture_view.release();
             self.texture.destroy();
@@ -93,6 +216,7 @@ pub fn Shader(BufferTypes: []const type) type {
                             const slot = BufferTypes[index].slot;
                             render_pass.setVertexBuffer(slot, buffer.?, 0, buffer.?.getSize());
                         },
+                        .uniform => {},
                     }
                 }
             }
@@ -105,6 +229,8 @@ pub fn Shader(BufferTypes: []const type) type {
                 0,
                 0,
             );
+
+            // std.debug.print("{}, {}\n", .{ (self.mesh.indices.len * @typeInfo(std.meta.fields(Mesh.Index)[0].type).array.len), self.mesh.indices.len });
         }
 
         pub fn addBuffer(self: *Self, graphics: Graphics, data: anytype) !void {
@@ -125,6 +251,7 @@ pub fn Shader(BufferTypes: []const type) type {
             const usage = switch (BufferType.buffer_type) {
                 .vertex, .instance => gpu.BufferUsage.vertex,
                 .index => gpu.BufferUsage.index,
+                .uniform => gpu.BufferUsage.uniform,
             } | gpu.BufferUsage.copy_dst;
 
             self.buffers[index] = graphics.device.createBuffer(&.{
@@ -138,21 +265,6 @@ pub fn Shader(BufferTypes: []const type) type {
                 0,
                 data.ptr,
                 data.len * @sizeOf(BufferType),
-            );
-        }
-
-        fn initUniformBuffer(self: *Self, graphics: Graphics) !void {
-            self.uniform_buffer = graphics.device.createBuffer(&.{
-                .label = "uniform buffer",
-                .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.uniform,
-                .size = @sizeOf(Mesh.Uniform),
-            }) orelse return Error.FailedToCreateBuffer;
-
-            graphics.queue.writeBuffer(
-                self.uniform_buffer,
-                0,
-                &self.mesh.uniform,
-                @sizeOf(Mesh.Uniform),
             );
         }
 
@@ -185,13 +297,7 @@ pub fn Shader(BufferTypes: []const type) type {
             }) orelse return Error.FailedToCreateBindGroupLayout;
         }
 
-        fn initBindGroup(self: *Self, graphics: Graphics) !void {
-            const entries = &[_]gpu.BindGroupEntry{ .{
-                .binding = 0,
-                .buffer = self.uniform_buffer,
-                .size = @sizeOf(Mesh.Uniform),
-            }, .{ .binding = 1, .texture_view = self.texture_view } };
-
+        fn initBindGroup(self: *Self, graphics: Graphics, entries: []const gpu.BindGroupEntry) !void {
             self.bind_group = graphics.device.createBindGroup(&.{
                 .label = "bind group",
                 .layout = self.bind_group_layout,

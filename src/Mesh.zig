@@ -25,6 +25,9 @@ pub const Index = extern struct {
 };
 
 pub const Uniform = struct {
+    pub const buffer_type: BufferTypeClass = .uniform;
+    pub const binding = 0;
+
     projection: Mat4x4(f32) align(16) = .{},
     view: Mat4x4(f32) align(16) = .{},
     _padding: u1 align(4) = undefined,
