@@ -16,28 +16,28 @@ far: f32 = 100,
 yaw: f32 = -90.0,
 pitch: f32 = 0.0,
 
-pub fn getViewMatrix(self: Camera) Mat4x4 {
+pub fn getViewMatrix(self: Camera) Mat4x4(f32) {
     const front = self.getFront();
     const s = math.normalize(math.cross(front, self.up));
     const u = math.cross(s, front);
 
-    return .{
+    return .{ .data = .{
         s[0],                        u[0],                        -front[0],                      0.0,
         s[1],                        u[1],                        -front[1],                      0.0,
         s[2],                        u[2],                        -front[2],                      0.0,
         -math.dot(s, self.position), -math.dot(u, self.position), math.dot(front, self.position), 1.0,
-    };
+    } };
 }
 
-pub fn getProjectionMatrix(self: Camera) Mat4x4 {
+pub fn getProjectionMatrix(self: Camera) Mat4x4(f32) {
     const f = 1.0 / @tan(self.fov / 2.0);
 
-    return .{
+    return .{ .data = .{
         f / self.aspect, 0.0, 0.0,                                                   0.0,
         0.0,             f,   0.0,                                                   0.0,
         0.0,             0.0, (self.far + self.near) / (self.near - self.far),       -1.0,
         0.0,             0.0, (2.0 * self.far * self.near) / (self.near - self.far), 0.0,
-    };
+    } };
 }
 
 pub fn moveRelative(self: *Camera, velocity: Vec3f) void {

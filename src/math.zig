@@ -1,6 +1,7 @@
-const comptimePrint = @import("std").fmt.comptimePrint;
-
-pub const Mat4x4 = @Vector(16, f32);
+pub const DataType = enum {
+    Vector,
+    Matrix,
+};
 
 pub fn Vec2(comptime T: type) type {
     return @Vector(2, T);
@@ -27,4 +28,13 @@ pub fn cross(a: Vec3(f32), b: @TypeOf(a)) @TypeOf(a) {
 
 pub fn dot(a: Vec3(f32), b: Vec3(f32)) f32 {
     return @reduce(.Add, a * b);
+}
+
+pub fn Mat4x4(comptime T: type) type {
+    return extern struct {
+        pub const data_type: DataType = .Matrix;
+        pub const shape = .{ 4, 4 };
+
+        data: @Vector(16, T) = @splat(0),
+    };
 }

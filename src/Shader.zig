@@ -1,3 +1,5 @@
+const assert = @import("std").debug.assert;
+
 const gpu = @import("wgpu");
 
 const Mesh = @import("Mesh.zig");
@@ -11,6 +13,11 @@ const Error = error{
     FailedToCreateView,
     FailedToCreateBindGroupLayout,
     FailedToCreateBindGroup,
+};
+
+pub const BufferType = enum {
+    vertex,
+    instance,
 };
 
 mesh: Mesh,

@@ -5,8 +5,11 @@ const Vec3f = math.Vec3(f32);
 const Mat4x4 = math.Mat4x4;
 
 const Mesh = @This();
+const BufferType = @import("buffer.zig").BufferType;
 
 pub const Point = extern struct {
+    pub const buffer_type: BufferType = .vertex;
+
     position: Position,
     color: Color,
 
@@ -17,12 +20,16 @@ pub const Point = extern struct {
 pub const Index = [3]u16;
 
 pub const Uniform = struct {
-    projection: Mat4x4 align(16) = @splat(0),
-    view: Mat4x4 align(16) = @splat(0),
+    projection: Mat4x4(f32) align(16) = .{},
+    view: Mat4x4(f32) align(16) = .{},
     _padding: u1 align(4) = undefined,
 };
 
-pub const Instance = Mat4x4;
+pub const Instance = extern struct {
+    pub const buffer_type: BufferType = .instance;
+
+    instance: Mat4x4(f32),
+};
 
 points: []const Point,
 indices: []const Index,
@@ -30,12 +37,12 @@ instances: []const Instance,
 uniform: Uniform,
 
 pub fn makeInstance(position: Vec3f) Instance {
-    return math.Mat4x4{
+    return .{ .instance = .{ .data = .{
         1,           0,           0,           0,
         0,           1,           0,           0,
         0,           0,           1,           0,
         position[0], position[1], position[2], 1,
-    };
+    } } };
 }
 
 pub fn getMaxBufferSize(mesh: Mesh) usize {

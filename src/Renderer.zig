@@ -10,6 +10,8 @@ const Mat4x4 = math.Mat4x4;
 const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
 const Shader = @import("Shader.zig");
+const DataType = math.DataType;
+const BufferType = @import("buffer.zig").BufferType;
 
 const Renderer = @This();
 
@@ -67,64 +69,16 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
         },
     };
 
-    const attributes = &comptime retval: {
-        const fields = @typeInfo(Mesh.Point).@"struct".fields;
+    const point_attributes = &comptime getAttributes(Mesh.Point, 0);
+    const instance_attributes = &comptime getAttributes(Mesh.Instance, point_attributes.len);
 
-        var _attributes: [fields.len]gpu.VertexAttribute = undefined;
-
-        for (fields, 0..) |field, i| {
-            const field_type = @typeInfo(field.type);
-
-            _attributes[i] = .{
-                .format = switch (field_type) {
-                    .vector => |arr| blk: {
-                        if ((arr.len == 2) and (arr.child == f32)) break :blk .float32x2;
-                        if ((arr.len == 3) and (arr.child == f32)) break :blk .float32x3;
-                        @compileError("unsupported type for vertex data");
-                    },
-                    else => @compileError("unsupported type for vertex data"),
-                },
-                .offset = @offsetOf(Mesh.Point, field.name),
-                .shader_location = i,
-            };
-        }
-
-        break :retval _attributes;
-    };
-
-    const instance_attributes = &[_]gpu.VertexAttribute{
-        .{
-            .format = .float32x4,
-            .offset = @sizeOf(f32) * 0,
-            .shader_location = 2,
-        },
-        .{
-            .format = .float32x4,
-            .offset = @sizeOf(f32) * 4,
-            .shader_location = 3,
-        },
-        .{
-            .format = .float32x4,
-            .offset = @sizeOf(f32) * 8,
-            .shader_location = 4,
-        },
-        .{
-            .format = .float32x4,
-            .offset = @sizeOf(f32) * 12,
-            .shader_location = 5,
-        },
-    };
-
-    const buffers = &[_]gpu.VertexBufferLayout{ .{
-        .array_stride = @sizeOf(Mesh.Point),
-        .attribute_count = attributes.len,
-        .attributes = attributes.ptr,
-    }, .{
-        .array_stride = @sizeOf(Mesh.Instance),
-        .attribute_count = instance_attributes.len,
-        .attributes = instance_attributes.ptr,
-        .step_mode = .instance,
-    } };
+    const buffers = &getVertexBufferLayouts(&[_]type{
+        Mesh.Point,
+        Mesh.Instance,
+    }, [_][]const gpu.VertexAttribute{
+        point_attributes,
+        instance_attributes,
+    });
 
     self.shader = try Shader.init(mesh, graphics);
 
@@ -285,4 +239,163 @@ pub fn deinit(self: Renderer) void {
     self.pipeline.release();
     self.deinitDepth();
     self.shader.deinit();
+}
+
+fn attributeCount(comptime vertex_type: type) comptime_int {
+    const fields = @typeInfo(vertex_type).@"struct".fields;
+
+    var attribute_count = 0;
+
+    for (fields) |field| {
+        switch (@typeInfo(field.type)) {
+            .vector => {
+                attribute_count += 1;
+            },
+            .@"struct" => {
+                if (!@hasDecl(field.type, "data_type")) @compileError("Data type of buffer must have decl data_type");
+                if (!@hasDecl(field.type, "shape")) @compileError("Data type of buffer must have decl shape");
+                if (std.meta.activeTag(@typeInfo(@TypeOf(field.type.shape))) != .@"struct") @compileError("Data type of buffer must have a shape tuple");
+                if (!@typeInfo(@TypeOf(field.type.shape)).@"struct".is_tuple) @compileError("Data type of buffer must have shape tuple longer than length 1");
+                attribute_count += field.type.shape.@"0";
+            },
+            else => @compileError("unsupported type for vertex data"),
+        }
+    }
+
+    return attribute_count;
+}
+
+fn getAttributes(
+    comptime Vertex: type,
+    comptime shader_location_offset: comptime_int,
+) [attributeCount(Vertex)]gpu.VertexAttribute {
+    const getFormat = struct {
+        pub fn f(length: comptime_int, T: type) gpu.VertexFormat {
+            if ((length == 2) and (T == f32)) return .float32x2;
+            if ((length == 3) and (T == f32)) return .float32x3;
+            if ((length == 4) and (T == f32)) return .float32x4;
+            @compileError("unsupported type for vertex data");
+        }
+    }.f;
+
+    return comptime blk: {
+        if (!@hasDecl(Vertex, "buffer_type")) @compileError(std.fmt.comptimePrint(
+            "Vertex type {} needs decl `buffer_type`",
+            .{Vertex},
+        ));
+        if (@TypeOf(Vertex.buffer_type) != BufferType) @compileError(std.fmt.comptimePrint(
+            "Vertex type {} needs decl `buffer_type` with type {}",
+            .{ Vertex, BufferType },
+        ));
+
+        const fields = @typeInfo(Vertex).@"struct".fields;
+
+        const AttributeUnion = union(enum) {
+            attributes: []gpu.VertexAttribute,
+            attribute: gpu.VertexAttribute,
+        };
+
+        var attribute_list: [fields.len]AttributeUnion = undefined;
+
+        var attribute_count = 0;
+        for (fields, 0..) |field, i| {
+            switch (@typeInfo(field.type)) {
+                .vector => |arr| {
+                    attribute_list[i] = .{ .attribute = .{
+                        .format = getFormat(arr.len, arr.child),
+                        .offset = @offsetOf(Vertex, field.name),
+                        .shader_location = shader_location_offset + attribute_count,
+                    } };
+
+                    attribute_count += 1;
+                },
+                .@"struct" => {
+                    assert(@hasDecl(field.type, "data_type"));
+                    assert(@TypeOf(field.type.data_type) == DataType);
+                    assert(field.type.data_type == .Matrix);
+
+                    const shape = field.type.shape;
+
+                    const T = @typeInfo(std.meta.fieldInfo(field.type, .data).type).vector.child;
+
+                    var attributes: [shape.@"0"]gpu.VertexAttribute = undefined;
+
+                    for (&attributes, 0..) |*a, col| {
+                        a.* = .{
+                            .format = getFormat(shape.@"1", T),
+                            .offset = @offsetOf(Vertex, field.name) + (col * shape.@"1" * @sizeOf(T)),
+                            .shader_location = shader_location_offset + attribute_count,
+                        };
+
+                        attribute_count += 1;
+                    }
+
+                    attribute_list[i] = .{ .attributes = &attributes };
+                },
+                else => @compileError("unsupported type for vertex data"),
+            }
+        }
+
+        var attributes: [attribute_count]gpu.VertexAttribute = undefined;
+
+        var i = 0;
+        for (attribute_list) |attribute_union| {
+            switch (attribute_union) {
+                .attribute => |a| {
+                    attributes[i] = a;
+                    i += 1;
+                },
+                .attributes => |as| {
+                    for (as) |a| {
+                        attributes[i] = a;
+                        i += 1;
+                    }
+                },
+            }
+        }
+
+        break :blk attributes;
+    };
+}
+
+fn getVertexBufferLayoutCount(comptime Vertexs: []const type) comptime_int {
+    var vertex_length = 0;
+    for (Vertexs) |Vertex| {
+        vertex_length += switch (Vertex.buffer_type) {
+            .vertex, .instance => 1,
+            .index => 0,
+        };
+    }
+    return vertex_length;
+}
+
+fn getVertexBufferLayouts(
+    comptime Vertexs: []const type,
+    buffer_attributes: [getVertexBufferLayoutCount(Vertexs)][]const gpu.VertexAttribute,
+) [getVertexBufferLayoutCount(Vertexs)]gpu.VertexBufferLayout {
+    var buffers: [getVertexBufferLayoutCount(Vertexs)]gpu.VertexBufferLayout = undefined;
+
+    comptime var i = 0;
+    inline for (Vertexs) |Vertex| {
+        switch (Vertex.buffer_type) {
+            .vertex, .instance => {},
+            else => continue,
+        }
+        defer i += 1;
+
+        const step_mode: gpu.VertexStepMode = switch (Vertex.buffer_type) {
+            .vertex => .vertex,
+            .instance => .instance,
+            else => unreachable,
+        };
+
+        buffers[i] = .{
+            .array_stride = @sizeOf(Vertex),
+            .attribute_count = buffer_attributes[i].len,
+            .attributes = buffer_attributes[i].ptr,
+            .step_mode = step_mode,
+        };
+    }
+
+    return buffers;
 }
