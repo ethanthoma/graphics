@@ -142,6 +142,12 @@ fn addFace(points: *std.ArrayList(Mesh.Point), indices: *std.ArrayList(Mesh.Inde
     }
 
     // Add indices for the face (two triangles)
-    try indices.append(.{ .index = .{ @intCast(base_index + 0), @intCast(base_index + 1), @intCast(base_index + 2) } });
-    try indices.append(.{ .index = .{ @intCast(base_index + 0), @intCast(base_index + 2), @intCast(base_index + 3) } });
+    try indices.appendSlice(&.{
+        .{ .index = @intCast(base_index + 0) },
+        .{ .index = @intCast(base_index + 1) },
+        .{ .index = @intCast(base_index + 2) },
+        .{ .index = @intCast(base_index + 0) },
+        .{ .index = @intCast(base_index + 2) },
+        .{ .index = @intCast(base_index + 3) },
+    });
 }

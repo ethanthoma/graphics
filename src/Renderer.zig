@@ -82,7 +82,7 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
         instance_attributes,
     });
 
-    self.shader = try Shader.init(mesh, graphics);
+    self.shader = try Shader.init(graphics);
 
     try self.shader.addBuffer(graphics, mesh.points);
     try self.shader.addBuffer(graphics, mesh.instances);

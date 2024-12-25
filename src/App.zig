@@ -84,18 +84,14 @@ pub fn init(allocator: std.mem.Allocator) !*App {
         try all_points.appendSlice(mesh.points);
 
         for (mesh.indices) |index| {
-            try all_indices.append(.{ .index = .{
-                index.index[0] + base_index,
-                index.index[1] + base_index,
-                index.index[2] + base_index,
-            } });
+            try all_indices.append(.{ .index = index.index + base_index });
         }
     }
 
     const mesh = Mesh{
         .points = try all_points.toOwnedSlice(),
         .indices = try all_indices.toOwnedSlice(),
-        .instances = try allocator.dupe(Mesh.Instance, &[_]Mesh.Instance{Mesh.makeInstance(.{ 0, 0, 0 })}),
+        .instances = try allocator.dupe(Mesh.Instance, &[_]Mesh.Instance{ Mesh.makeInstance(.{ 0, 0, 0 }), Mesh.makeInstance(.{ 0, 5, 0 }) }),
         .uniform = .{},
     };
 

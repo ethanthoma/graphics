@@ -21,7 +21,7 @@ pub const Point = extern struct {
 pub const Index = extern struct {
     pub const buffer_type: BufferTypeClass = .index;
 
-    index: [3]u16,
+    index: u16,
 };
 
 pub const Uniform = struct {

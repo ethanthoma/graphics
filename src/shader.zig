@@ -25,6 +25,14 @@ pub fn Shader(BufferTypes: []const type) type {
 
     const textureCount = 1;
 
+    const DrawInfo = struct {
+        index_size: usize = 1,
+        index_buffer: ?*gpu.Buffer = null,
+        index_type_len: usize = 1,
+        instance_buffer: ?*gpu.Buffer = null,
+        instance_size: usize = 1,
+    };
+
     return struct {
         const Self = @This();
 
@@ -128,7 +136,6 @@ pub fn Shader(BufferTypes: []const type) type {
             }
         } else struct {};
 
-        mesh: Mesh,
         buffers: [BufferTypes.len]?*gpu.Buffer = .{null} ** BufferTypes.len,
 
         uniforms: [uniformCount]*anyopaque = undefined,
@@ -141,7 +148,7 @@ pub fn Shader(BufferTypes: []const type) type {
         bind_group_layout: *gpu.BindGroupLayout,
         bind_group: *gpu.BindGroup,
 
-        pub fn init(mesh: Mesh, graphics: Graphics) !Self {
+        pub fn init(graphics: Graphics) !Self {
             var self: Self = undefined;
 
             self.buffers = .{null} ** BufferTypes.len;
@@ -150,8 +157,6 @@ pub fn Shader(BufferTypes: []const type) type {
 
             self.bind_group_entries = .{null} ** (uniformCount + textureCount);
             self.bind_group_entries[uniformCount] = .{ .binding = 1, .texture_view = self.texture_view };
-
-            self.mesh = mesh;
 
             try initBindGroupLayout(&self, graphics);
 
@@ -193,17 +198,30 @@ pub fn Shader(BufferTypes: []const type) type {
         }
 
         pub fn render(self: *const Self, render_pass: *gpu.RenderPassEncoder) void {
+            var draw_info: DrawInfo = .{};
+
             inline for (self.buffers, 0..) |buffer, index| {
                 if (buffer != null) {
                     switch (BufferTypes[index].buffer_type) {
                         .index => {
                             const data_type: gpu.IndexFormat = switch (@typeInfo(std.meta.fields(BufferTypes[index])[0].type)) {
-                                .array => |t| switch (t.child) {
-                                    u16 => .uint16,
-                                    else => @compileError(std.fmt.comptimePrint(
+                                .array => |t| blk: {
+                                    draw_info.index_type_len *= t.len;
+
+                                    break :blk switch (t.child) {
+                                        u16 => .uint16,
+                                        else => @compileError(std.fmt.comptimePrint(
+                                            "Unsupported index data type {}",
+                                            .{t.child},
+                                        )),
+                                    };
+                                },
+                                .int => |t| blk: {
+                                    if (t.bits == 16 and t.signedness == .unsigned) break :blk .uint16;
+                                    @compileError(std.fmt.comptimePrint(
                                         "Unsupported index data type {}",
-                                        .{t.child},
-                                    )),
+                                        .{t},
+                                    ));
                                 },
                                 else => |t| @compileError(std.fmt.comptimePrint(
                                     "Unsupported index data type {}",
@@ -211,10 +229,15 @@ pub fn Shader(BufferTypes: []const type) type {
                                 )),
                             };
                             render_pass.setIndexBuffer(buffer.?, data_type, 0, buffer.?.getSize());
+
+                            draw_info.index_buffer = buffer;
+                            draw_info.index_size = @sizeOf(BufferTypes[index]);
                         },
-                        .instance, .vertex => {
+                        .instance, .vertex => |buf_type| {
                             const slot = BufferTypes[index].slot;
                             render_pass.setVertexBuffer(slot, buffer.?, 0, buffer.?.getSize());
+
+                            if (buf_type == .instance) draw_info.instance_size = buffer.?.getSize() / @sizeOf(BufferTypes[index]);
                         },
                         .uniform => {},
                     }
@@ -222,15 +245,19 @@ pub fn Shader(BufferTypes: []const type) type {
             }
 
             render_pass.setBindGroup(0, self.bind_group, 0, null);
-            render_pass.drawIndexed(
-                @intCast(self.mesh.indices.len * @typeInfo(std.meta.fields(Mesh.Index)[0].type).array.len),
-                @intCast(self.mesh.instances.len),
-                0,
-                0,
-                0,
-            );
 
-            // std.debug.print("{}, {}\n", .{ (self.mesh.indices.len * @typeInfo(std.meta.fields(Mesh.Index)[0].type).array.len), self.mesh.indices.len });
+            if (draw_info.index_buffer) |buffer| {
+                const index_count: u32 = @intCast(buffer.getSize() / draw_info.index_size);
+                const instance_count: u32 = @intCast(draw_info.instance_size);
+
+                render_pass.drawIndexed(
+                    index_count,
+                    instance_count,
+                    0,
+                    0,
+                    0,
+                );
+            }
         }
 
         pub fn addBuffer(self: *Self, graphics: Graphics, data: anytype) !void {
