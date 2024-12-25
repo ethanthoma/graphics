@@ -84,11 +84,11 @@ pub fn init(allocator: std.mem.Allocator) !*App {
         try all_points.appendSlice(mesh.points);
 
         for (mesh.indices) |index| {
-            try all_indices.append(.{
-                index[0] + base_index,
-                index[1] + base_index,
-                index[2] + base_index,
-            });
+            try all_indices.append(.{ .index = .{
+                index.index[0] + base_index,
+                index.index[1] + base_index,
+                index.index[2] + base_index,
+            } });
         }
     }
 

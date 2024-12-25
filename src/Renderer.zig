@@ -9,9 +9,9 @@ const math = @import("math.zig");
 const Mat4x4 = math.Mat4x4;
 const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
-const Shader = @import("Shader.zig");
+const Shader = @import("shader.zig").Shader(&[_]type{ Mesh.Point, Mesh.Instance, Mesh.Index });
 const DataType = math.DataType;
-const BufferType = @import("buffer.zig").BufferType;
+const BufferTypeClass = @import("buffer.zig").BufferTypeClass;
 
 const Renderer = @This();
 
@@ -283,9 +283,9 @@ fn getAttributes(
             "Vertex type {} needs decl `buffer_type`",
             .{Vertex},
         ));
-        if (@TypeOf(Vertex.buffer_type) != BufferType) @compileError(std.fmt.comptimePrint(
+        if (@TypeOf(Vertex.buffer_type) != BufferTypeClass) @compileError(std.fmt.comptimePrint(
             "Vertex type {} needs decl `buffer_type` with type {}",
-            .{ Vertex, BufferType },
+            .{ Vertex, BufferTypeClass },
         ));
 
         const fields = @typeInfo(Vertex).@"struct".fields;

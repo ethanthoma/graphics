@@ -5,10 +5,11 @@ const Vec3f = math.Vec3(f32);
 const Mat4x4 = math.Mat4x4;
 
 const Mesh = @This();
-const BufferType = @import("buffer.zig").BufferType;
+const BufferTypeClass = @import("buffer.zig").BufferTypeClass;
 
 pub const Point = extern struct {
-    pub const buffer_type: BufferType = .vertex;
+    pub const buffer_type: BufferTypeClass = .vertex;
+    pub const slot = 0;
 
     position: Position,
     color: Color,
@@ -17,7 +18,11 @@ pub const Point = extern struct {
     pub const Color = Vec3f;
 };
 
-pub const Index = [3]u16;
+pub const Index = extern struct {
+    pub const buffer_type: BufferTypeClass = .index;
+
+    index: [3]u16,
+};
 
 pub const Uniform = struct {
     projection: Mat4x4(f32) align(16) = .{},
@@ -26,7 +31,8 @@ pub const Uniform = struct {
 };
 
 pub const Instance = extern struct {
-    pub const buffer_type: BufferType = .instance;
+    pub const buffer_type: BufferTypeClass = .instance;
+    pub const slot = 1;
 
     instance: Mat4x4(f32),
 };
