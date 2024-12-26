@@ -20,12 +20,6 @@ pub const Point = extern struct {
     pub const Color = Vec3f;
 };
 
-pub const Index = extern struct {
-    pub const buffer_type: BufferTypeClass = .index;
-
-    index: u16,
-};
-
 pub const Uniform = struct {
     pub const buffer_type: BufferTypeClass = .uniform;
     pub const binding = 0;
@@ -55,10 +49,24 @@ pub const Texture = struct {
     pub const Color = @Vector(4, u8);
 };
 
+allocator: std.mem.Allocator,
 points: []const Point,
-indices: []const Index,
 instances: []const Instance,
 uniform: Uniform,
+
+pub fn init(allocator: std.mem.Allocator, points: []const Point, instances: []const Instance) Mesh {
+    return .{
+        .allocator = allocator,
+        .points = allocator.dupe(Point, points),
+        .instances = allocator.dupe(Instance, instances),
+        .uniform = .{},
+    };
+}
+
+pub fn deinit(self: *Mesh) void {
+    self.allocator.free(self.points);
+    self.allocator.free(self.instances);
+}
 
 pub fn makeInstance(position: Vec3f) Instance {
     return .{ .instance = .{ .data = .{
@@ -86,7 +94,7 @@ pub fn getMaxBufferSize(mesh: Mesh) usize {
         max_buffer_size = if (buffer_size > max_buffer_size) buffer_size else max_buffer_size;
     }
 
-    return max_buffer_size;
+    return max_buffer_size * 2;
 }
 
 pub fn getMaxUniformBufferBindingSize(mesh: Mesh) usize {

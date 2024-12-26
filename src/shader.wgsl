@@ -52,7 +52,7 @@ fn vs_main(
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let tex_size = textureDimensions(texture); // 256 x 256
-    let pos = modf(in.block_position).fract;
+    let pos = modf(abs(in.block_position)).fract;
 
     let EPSILON = 0.00001;
 

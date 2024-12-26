@@ -87,7 +87,8 @@ pub fn Shader(BufferTypes: []const type) type {
         index_buffer: ?*gpu.Buffer = null,
         index_type_len: usize = 1,
         instance_buffer: ?*gpu.Buffer = null,
-        instance_size: usize = 1,
+        instance_count: usize = 1,
+        vertex_count: usize = 0,
     };
 
     return struct {
@@ -96,23 +97,6 @@ pub fn Shader(BufferTypes: []const type) type {
         pub usingnamespace for (BufferTypes) |BufferType| {
             switch (BufferType.buffer_type) {
                 .uniform => break struct {
-                    fn getUniformIndex(Uniform: type) comptime_int {
-                        comptime var index = 0;
-                        inline for (BufferTypes) |_BufferType| {
-                            switch (_BufferType.buffer_type) {
-                                .uniform => {
-                                    if (Uniform == _BufferType) break;
-                                    index += 1;
-                                },
-                                else => {},
-                            }
-                        } else @compileError(std.fmt.comptimePrint(
-                            "Passed in Uniform data {} doesn't match BufferTypes",
-                            .{Uniform},
-                        ));
-                        return index;
-                    }
-
                     pub fn addUniform(
                         self: *Self,
                         allocator: std.mem.Allocator,
@@ -180,6 +164,23 @@ pub fn Shader(BufferTypes: []const type) type {
                             @sizeOf(std.meta.fieldInfo(Uniform, field_tag).type),
                         );
                     }
+
+                    fn getUniformIndex(Uniform: type) comptime_int {
+                        comptime var index = 0;
+                        inline for (BufferTypes) |_BufferType| {
+                            switch (_BufferType.buffer_type) {
+                                .uniform => {
+                                    if (Uniform == _BufferType) break;
+                                    index += 1;
+                                },
+                                else => {},
+                            }
+                        } else @compileError(std.fmt.comptimePrint(
+                            "Passed in Uniform data {} doesn't match BufferTypes",
+                            .{Uniform},
+                        ));
+                        return index;
+                    }
                 },
                 else => {},
             }
@@ -188,23 +189,6 @@ pub fn Shader(BufferTypes: []const type) type {
         pub usingnamespace for (BufferTypes) |BufferType| {
             switch (BufferType.buffer_type) {
                 .texture => break struct {
-                    fn getTextureIndex(Texture: type) comptime_int {
-                        comptime var index = 0;
-                        inline for (BufferTypes) |_BufferType| {
-                            switch (_BufferType.buffer_type) {
-                                .texture => {
-                                    if (Texture == _BufferType) break;
-                                    index += 1;
-                                },
-                                else => {},
-                            }
-                        } else @compileError(std.fmt.comptimePrint(
-                            "Passed in Texture data {} doesn't match BufferTypes",
-                            .{Texture},
-                        ));
-                        return index;
-                    }
-
                     pub fn addTexture(
                         self: *Self,
                         allocator: std.mem.Allocator,
@@ -265,6 +249,23 @@ pub fn Shader(BufferTypes: []const type) type {
                         };
 
                         _ = try tryInitBindGroup(self, graphics);
+                    }
+
+                    fn getTextureIndex(Texture: type) comptime_int {
+                        comptime var index = 0;
+                        inline for (BufferTypes) |_BufferType| {
+                            switch (_BufferType.buffer_type) {
+                                .texture => {
+                                    if (Texture == _BufferType) break;
+                                    index += 1;
+                                },
+                                else => {},
+                            }
+                        } else @compileError(std.fmt.comptimePrint(
+                            "Passed in Texture data {} doesn't match BufferTypes",
+                            .{Texture},
+                        ));
+                        return index;
                     }
                 },
                 else => {},
@@ -378,7 +379,8 @@ pub fn Shader(BufferTypes: []const type) type {
                             const slot = BufferTypes[index].slot;
                             render_pass.setVertexBuffer(slot, buffer.?, 0, buffer.?.getSize());
 
-                            if (buf_type == .instance) draw_info.instance_size = buffer.?.getSize() / @sizeOf(BufferTypes[index]);
+                            if (buf_type == .instance) draw_info.instance_count = buffer.?.getSize() / @sizeOf(BufferTypes[index]);
+                            if (buf_type == .vertex) draw_info.vertex_count = buffer.?.getSize() / @sizeOf(BufferTypes[index]);
                         },
                         .uniform, .texture => {},
                     }
@@ -389,32 +391,44 @@ pub fn Shader(BufferTypes: []const type) type {
 
             if (draw_info.index_buffer) |buffer| {
                 const index_count: u32 = @intCast(buffer.getSize() / draw_info.index_size);
-                const instance_count: u32 = @intCast(draw_info.instance_size);
+                const instance_count: u32 = @intCast(draw_info.instance_count);
 
-                render_pass.drawIndexed(
-                    index_count,
-                    instance_count,
-                    0,
-                    0,
-                    0,
-                );
+                render_pass.drawIndexed(index_count, instance_count, 0, 0, 0);
+            } else {
+                const vertex_count: u32 = @intCast(draw_info.vertex_count);
+                const instance_count: u32 = @intCast(draw_info.instance_count);
+
+                render_pass.draw(vertex_count, instance_count, 0, 0);
             }
         }
 
         pub fn addBuffer(self: *Self, graphics: Graphics, data: anytype) !void {
             if (@typeInfo(@TypeOf(data)) != .pointer) @compileError("Buffer data shoud be a slice");
 
-            const meta = inline for (BufferTypes, 0..) |BufferType, i| {
-                if (BufferType == @typeInfo(@TypeOf(data)).pointer.child) {
-                    break .{ BufferType, i };
-                }
-            } else {
-                @compileError(std.fmt.comptimePrint(
-                    "Buffer data was of type {} but expected one of {any}",
-                    .{ @typeInfo(@TypeOf(data)).pointer.child, BufferTypes },
-                ));
-            };
-            const BufferType, const index = meta;
+            const BufferType = @typeInfo(@TypeOf(data)).pointer.child;
+            const index = inline for (BufferTypes, 0..) |_BufferType, i| {
+                if (BufferType == _BufferType) break i;
+            } else @compileError("Removed buffer type is not one of the passed in shader types");
+
+            if (self.buffers[index]) |buffer| {
+                graphics.queue.submit(&[_]*const gpu.CommandBuffer{});
+                buffer.destroy();
+                buffer.release();
+                self.buffers[index] = null;
+            }
+
+            self.buffers[index] = try createBuffer(graphics, data);
+        }
+
+        fn createBuffer(graphics: Graphics, data: anytype) !*gpu.Buffer {
+            const BufferType = @typeInfo(@TypeOf(data)).pointer.child;
+
+            inline for (BufferTypes) |_BufferType| {
+                if (BufferType == _BufferType) break;
+            } else @compileError(std.fmt.comptimePrint(
+                "Buffer data was of type {} but expected one of {any}",
+                .{ BufferType, BufferTypes },
+            ));
 
             const usage = switch (BufferType.buffer_type) {
                 .vertex, .instance => gpu.BufferUsage.vertex,
@@ -422,18 +436,24 @@ pub fn Shader(BufferTypes: []const type) type {
                 .uniform, .texture => @compileError("Do not use addBuffer for uniforms or textures"),
             } | gpu.BufferUsage.copy_dst;
 
-            self.buffers[index] = graphics.device.createBuffer(&.{
+            std.debug.print("creating {s} buffer with size {}...\n", .{ @typeName(BufferType), data.len * @sizeOf(BufferType) });
+            const buffer = graphics.device.createBuffer(&.{
                 .label = std.fmt.comptimePrint("{s} buffer", .{@typeName(BufferType)}),
                 .usage = usage,
                 .size = data.len * @sizeOf(BufferType),
             }) orelse return Error.FailedToCreateBuffer;
+            std.debug.print("created\n", .{});
 
+            std.debug.print("writing to {s} buffer...\n", .{@typeName(BufferType)});
             graphics.queue.writeBuffer(
-                self.buffers[index].?,
+                buffer,
                 0,
                 data.ptr,
                 data.len * @sizeOf(BufferType),
             );
+            std.debug.print("writen\n", .{});
+
+            return buffer;
         }
     };
 }

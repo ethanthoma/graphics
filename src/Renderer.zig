@@ -27,7 +27,7 @@ const Error = error{
     FailedToFinishEncoder,
 };
 
-const ShaderTypes = [_]type{ Mesh.Point, Mesh.Instance, Mesh.Index, Mesh.Uniform, Mesh.Texture };
+const ShaderTypes = [_]type{ Mesh.Point, Mesh.Instance, Mesh.Uniform, Mesh.Texture };
 
 pipeline: *gpu.RenderPipeline,
 layout: *gpu.PipelineLayout,
@@ -39,7 +39,7 @@ depth_view: *gpu.TextureView,
 width: u32,
 height: u32,
 
-pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
+pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
     var self: Renderer = undefined;
 
     self.width = width;
@@ -86,10 +86,6 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
 
     try self.shader.addBuffer(graphics, mesh.points);
     try self.shader.addBuffer(graphics, mesh.instances);
-    try self.shader.addBuffer(graphics, mesh.indices);
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
 
     try self.shader.addUniform(allocator, graphics, mesh.uniform);
 
