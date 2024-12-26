@@ -63,7 +63,7 @@ pub fn init(allocator: std.mem.Allocator, points: []const Point, instances: []co
     };
 }
 
-pub fn deinit(self: *Mesh) void {
+pub fn deinit(self: *const Mesh) void {
     self.allocator.free(self.points);
     self.allocator.free(self.instances);
 }
@@ -94,7 +94,7 @@ pub fn getMaxBufferSize(mesh: Mesh) usize {
         max_buffer_size = if (buffer_size > max_buffer_size) buffer_size else max_buffer_size;
     }
 
-    return max_buffer_size * 2;
+    return max_buffer_size * 4;
 }
 
 pub fn getMaxUniformBufferBindingSize(mesh: Mesh) usize {

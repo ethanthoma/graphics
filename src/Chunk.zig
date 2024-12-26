@@ -8,7 +8,7 @@ const Mat4x4 = math.Mat4x4;
 
 pub const CHUNK_SIZE = 5;
 
-const Block = enum {
+pub const Block = enum {
     air,
     solid,
 };
@@ -43,12 +43,12 @@ fn generateChunk(self: *Chunk, position: Vec3i) void {
 
 pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i) !Mesh {
     const front_face = &[_]Vec3f{
-        .{ 0.0, 0.0, 1.0 }, // Bottom-left
-        .{ 1.0, 0.0, 1.0 }, // Bottom-right
-        .{ 1.0, 1.0, 1.0 }, // Top-right
-        .{ 0.0, 0.0, 1.0 }, // Bottom-left
-        .{ 1.0, 1.0, 1.0 }, // Top-right
-        .{ 0.0, 1.0, 1.0 }, // Top-left
+        .{ 0.0, 0.0, 1.0 },
+        .{ 1.0, 0.0, 1.0 },
+        .{ 1.0, 1.0, 1.0 },
+        .{ 0.0, 0.0, 1.0 },
+        .{ 1.0, 1.0, 1.0 },
+        .{ 0.0, 1.0, 1.0 },
     };
     const back_face = &[_]Vec3f{
         .{ 1.0, 0.0, 0.0 },
@@ -117,12 +117,23 @@ pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i)
 
                 const color = colors[@abs(@rem(@reduce(.Add, position), @as(i32, @intCast(colors.len))))];
 
-                try addFace(&points, block_pos, front_face, color);
-                try addFace(&points, block_pos, back_face, color);
-                try addFace(&points, block_pos, right_face, color);
-                try addFace(&points, block_pos, left_face, color);
-                try addFace(&points, block_pos, top_face, color);
-                try addFace(&points, block_pos, bottom_face, color);
+                if (z == CHUNK_SIZE - 1 or self.data[x][y][z + 1] == .air)
+                    try addFace(&points, block_pos, front_face, color);
+
+                if (z == 0 or self.data[x][y][z - 1] == .air)
+                    try addFace(&points, block_pos, back_face, color);
+
+                if (x == CHUNK_SIZE - 1 or self.data[x + 1][y][z] == .air)
+                    try addFace(&points, block_pos, right_face, color);
+
+                if (x == 0 or self.data[x - 1][y][z] == .air)
+                    try addFace(&points, block_pos, left_face, color);
+
+                if (y == CHUNK_SIZE - 1 or self.data[x][y + 1][z] == .air)
+                    try addFace(&points, block_pos, top_face, color);
+
+                if (y == 0 or self.data[x][y - 1][z] == .air)
+                    try addFace(&points, block_pos, bottom_face, color);
             }
         }
     }

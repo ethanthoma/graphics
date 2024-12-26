@@ -77,13 +77,15 @@ fn getRequiredLimits(mesh: Mesh, adapter: *gpu.Adapter) gpu.RequiredLimits {
         .limits = .{},
     };
 
-    // TODO: automate this
+    // TODO: automate this; mostly just needs type information from shader.zig
     required_limits.limits.max_vertex_attributes = 6;
     // std.meta.fields(Mesh.Point).len;
     required_limits.limits.max_vertex_buffers = 2; // should find a way to automate this
     required_limits.limits.max_inter_stage_shader_components = 6; // from shader code itself
 
+    // this needs to know an upper bound on my vertices
     required_limits.limits.max_buffer_size = mesh.getMaxBufferSize();
+    // should be derived from shader types passed into Graphics struct
     required_limits.limits.max_vertex_buffer_array_stride = @sizeOf(Mesh.Instance);
 
     required_limits.limits.max_texture_array_layers = 1;
