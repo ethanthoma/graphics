@@ -27,7 +27,7 @@ const Error = error{
     FailedToFinishEncoder,
 };
 
-const ShaderTypes = [_]type{ Mesh.Point, Mesh.Instance, Mesh.Index, Mesh.Uniform };
+const ShaderTypes = [_]type{ Mesh.Point, Mesh.Instance, Mesh.Index, Mesh.Uniform, Mesh.Texture };
 
 pipeline: *gpu.RenderPipeline,
 layout: *gpu.PipelineLayout,
@@ -92,6 +92,29 @@ pub fn init(mesh: Mesh, graphics: Graphics, width: u32, height: u32) !Renderer {
     const allocator = gpa.allocator();
 
     try self.shader.addUniform(allocator, graphics, mesh.uniform);
+
+    const texture = Mesh.Texture{
+        .size = .{ 256, 256 },
+        .data = &blk: {
+            const border = 3;
+
+            var pixels: [256 * 256]Mesh.Texture.Color = undefined;
+            for (0..256) |y| for (0..256) |x| {
+                pixels[y * 256 + x] = .{
+                    0,
+                    192,
+                    0,
+                    255,
+                };
+
+                if (x < border or x >= width - border or y < border or y >= height - border) {
+                    pixels[y * 256 + x] = .{ 0, 0, 0, 255 };
+                }
+            };
+            break :blk pixels;
+        },
+    };
+    try self.shader.addTexture(allocator, graphics, texture);
 
     const bind_group_layouts = &[_]*const gpu.BindGroupLayout{self.shader.bind_group_layout};
 
@@ -361,7 +384,7 @@ fn getVertexBufferLayoutCount(comptime Vertexs: []const type) comptime_int {
     for (Vertexs) |Vertex| {
         vertex_length += switch (Vertex.buffer_type) {
             .vertex, .instance => 1,
-            .index, .uniform => 0,
+            .index, .uniform, .texture => 0,
         };
     }
     return vertex_length;

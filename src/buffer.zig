@@ -3,4 +3,5 @@ pub const BufferTypeClass = enum {
     instance,
     index,
     uniform,
+    texture,
 };

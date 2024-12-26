@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const gpu = @import("wgpu");
+
 const math = @import("math.zig");
 const Vec3f = math.Vec3(f32);
 const Mat4x4 = math.Mat4x4;
@@ -38,6 +40,17 @@ pub const Instance = extern struct {
     pub const slot = 1;
 
     instance: Mat4x4(f32),
+};
+
+pub const Texture = struct {
+    pub const buffer_type: BufferTypeClass = .texture;
+    pub const binding = 1;
+    pub const format: gpu.TextureFormat = .rgba8_unorm;
+
+    size: [2]usize,
+    data: []const Color,
+
+    pub const Color = @Vector(4, u8);
 };
 
 points: []const Point,

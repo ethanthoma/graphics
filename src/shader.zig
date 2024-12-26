@@ -23,7 +23,13 @@ pub fn Shader(BufferTypes: []const type) type {
         } else count;
     };
 
-    const textureCount = 1;
+    const textureCount = blk: {
+        var count = 0;
+        break :blk inline for (BufferTypes) |BufferType| switch (BufferType.buffer_type) {
+            .texture => count += 1,
+            else => {},
+        } else count;
+    };
 
     const DrawInfo = struct {
         index_size: usize = 1,
@@ -39,19 +45,6 @@ pub fn Shader(BufferTypes: []const type) type {
         pub usingnamespace for (BufferTypes) |BufferType| {
             switch (BufferType.buffer_type) {
                 .uniform => break struct {
-                    fn UniformType(index: usize) type {
-                        var local_index = 0;
-                        inline for (BufferTypes) |_BufferType| {
-                            switch (_BufferType.buffer_type) {
-                                .uniform => {
-                                    if (index == local_index) return _BufferType;
-                                    local_index += 1;
-                                },
-                                else => {},
-                            }
-                        } else @compileError("Passed in index out of bounds");
-                    }
-
                     fn getUniformIndex(Uniform: type) comptime_int {
                         comptime var index = 0;
                         inline for (BufferTypes) |_BufferType| {
@@ -69,18 +62,23 @@ pub fn Shader(BufferTypes: []const type) type {
                         return index;
                     }
 
-                    pub fn addUniform(self: *Self, allocator: std.mem.Allocator, graphics: Graphics, data: anytype) !void {
-                        const index = getUniformIndex(@TypeOf(data));
+                    pub fn addUniform(
+                        self: *Self,
+                        allocator: std.mem.Allocator,
+                        graphics: Graphics,
+                        data: anytype,
+                    ) !void {
+                        const Uniform = @TypeOf(data);
 
-                        const uniform = try allocator.create(@TypeOf(data));
+                        const index = getUniformIndex(Uniform);
+
+                        const uniform = try allocator.create(Uniform);
                         uniform.* = data;
 
                         self.uniforms[index] = uniform;
 
                         const buffer_index = inline for (BufferTypes, 0..) |_BufferType, i|
-                            if (_BufferType == @TypeOf(data)) break i;
-
-                        const Uniform = @TypeOf(data);
+                            if (_BufferType == Uniform) break i;
 
                         const buffer = graphics.device.createBuffer(&.{
                             .label = std.fmt.comptimePrint("uniform {} buffer", .{Uniform}),
@@ -136,14 +134,100 @@ pub fn Shader(BufferTypes: []const type) type {
             }
         } else struct {};
 
+        pub usingnamespace for (BufferTypes) |BufferType| {
+            switch (BufferType.buffer_type) {
+                .texture => break struct {
+                    fn getTextureIndex(Texture: type) comptime_int {
+                        comptime var index = 0;
+                        inline for (BufferTypes) |_BufferType| {
+                            switch (_BufferType.buffer_type) {
+                                .texture => {
+                                    if (Texture == _BufferType) break;
+                                    index += 1;
+                                },
+                                else => {},
+                            }
+                        } else @compileError(std.fmt.comptimePrint(
+                            "Passed in Texture data {} doesn't match BufferTypes",
+                            .{Texture},
+                        ));
+                        return index;
+                    }
+
+                    pub fn addTexture(
+                        self: *Self,
+                        allocator: std.mem.Allocator,
+                        graphics: Graphics,
+                        data: anytype,
+                    ) !void {
+                        const Texture = @TypeOf(data);
+
+                        const index = getTextureIndex(Texture);
+
+                        const texture = try allocator.create(Texture);
+                        texture.* = data;
+
+                        self.textures[index] = texture;
+
+                        const width, const height = @as(Texture, data).size;
+                        const format = Texture.format;
+
+                        const gpu_texture = graphics.device.createTexture(&.{
+                            .usage = gpu.TextureUsage.texture_binding | gpu.TextureUsage.copy_dst,
+                            .size = .{
+                                .width = @intCast(width),
+                                .height = @intCast(height),
+                            },
+                            .format = format,
+                            .mip_level_count = 1,
+                            .sample_count = 1,
+                        }) orelse return Error.FailedToCreateTexture;
+
+                        const gpu_texture_view = gpu_texture.createView(&.{
+                            .format = format,
+                            .dimension = .@"2d",
+                            .array_layer_count = 1,
+                            .mip_level_count = 1,
+                        }) orelse return Error.FailedToCreateView;
+
+                        self.texture_context[index] = .{ gpu_texture, gpu_texture_view };
+
+                        const bytes = std.mem.sliceAsBytes(@as(Texture, data).data);
+
+                        const bytes_per_row = bytes.len / height;
+                        const rows_per_image = height;
+
+                        graphics.queue.writeTexture(
+                            &.{ .texture = gpu_texture, .origin = .{} },
+                            bytes.ptr,
+                            bytes.len,
+                            &.{
+                                .bytes_per_row = @intCast(bytes_per_row),
+                                .rows_per_image = @intCast(rows_per_image),
+                            },
+                            &.{ .width = @intCast(width), .height = @intCast(height) },
+                        );
+
+                        self.bind_group_entries[uniformCount + index] = .{
+                            .binding = Texture.binding,
+                            .texture_view = gpu_texture_view,
+                        };
+
+                        _ = try tryInitBindGroup(self, graphics);
+                    }
+                },
+                else => {},
+            }
+        } else struct {};
+
         buffers: [BufferTypes.len]?*gpu.Buffer = .{null} ** BufferTypes.len,
 
         uniforms: [uniformCount]*anyopaque = undefined,
+        textures: [textureCount]*anyopaque = undefined,
 
         bind_group_entries: [uniformCount + textureCount]?gpu.BindGroupEntry = undefined,
 
-        texture: *gpu.Texture,
-        texture_view: *gpu.TextureView,
+        texture_context: [textureCount]struct { *gpu.Texture, *gpu.TextureView } = undefined,
 
         bind_group_layout: *gpu.BindGroupLayout,
         bind_group: *gpu.BindGroup,
@@ -153,10 +237,9 @@ pub fn Shader(BufferTypes: []const type) type {
 
             self.buffers = .{null} ** BufferTypes.len;
 
-            try initTexture(&self, graphics);
+            //try initTexture(&self, graphics);
 
             self.bind_group_entries = .{null} ** (uniformCount + textureCount);
-            self.bind_group_entries[uniformCount] = .{ .binding = 1, .texture_view = self.texture_view };
 
             try initBindGroupLayout(&self, graphics);
 
@@ -190,9 +273,12 @@ pub fn Shader(BufferTypes: []const type) type {
                 }
             }
 
-            self.texture_view.release();
-            self.texture.destroy();
-            self.texture.release();
+            for (&self.texture_context) |texture_context| {
+                const texture, const texture_view = texture_context;
+                texture_view.release();
+                texture.destroy();
+                texture.release();
+            }
 
             self.bind_group_layout.release();
         }
@@ -239,7 +325,7 @@ pub fn Shader(BufferTypes: []const type) type {
 
                             if (buf_type == .instance) draw_info.instance_size = buffer.?.getSize() / @sizeOf(BufferTypes[index]);
                         },
-                        .uniform => {},
+                        .uniform, .texture => {},
                     }
                 }
             }
@@ -278,7 +364,7 @@ pub fn Shader(BufferTypes: []const type) type {
             const usage = switch (BufferType.buffer_type) {
                 .vertex, .instance => gpu.BufferUsage.vertex,
                 .index => gpu.BufferUsage.index,
-                .uniform => gpu.BufferUsage.uniform,
+                .uniform, .texture => @compileError("Do not use addBuffer for uniforms or textures"),
             } | gpu.BufferUsage.copy_dst;
 
             self.buffers[index] = graphics.device.createBuffer(&.{
@@ -331,56 +417,6 @@ pub fn Shader(BufferTypes: []const type) type {
                 .entry_count = entries.len,
                 .entries = entries.ptr,
             }) orelse return Error.FailedToCreateBindGroup;
-        }
-
-        fn initTexture(self: *Self, graphics: Graphics) !void {
-            const width = 256;
-            const height = 256;
-            const border = 3;
-
-            self.texture = graphics.device.createTexture(&.{
-                .usage = gpu.TextureUsage.texture_binding | gpu.TextureUsage.copy_dst,
-                .size = .{
-                    .width = width,
-                    .height = height,
-                },
-                .format = .rgba8_unorm,
-                .mip_level_count = 1,
-                .sample_count = 1,
-            }) orelse return Error.FailedToCreateTexture;
-
-            self.texture_view = self.texture.createView(&.{
-                .format = .rgba8_unorm,
-                .dimension = .@"2d",
-                .array_layer_count = 1,
-                .mip_level_count = 1,
-            }) orelse return Error.FailedToCreateView;
-
-            var pixels: [width * height * 4]u8 = undefined;
-            for (0..height) |y| {
-                for (0..width) |x| {
-                    const color: *[4]u8 = @ptrCast(&pixels[(y * height + x) * 4]);
-
-                    color.* = .{
-                        0,
-                        192,
-                        0,
-                        255,
-                    };
-
-                    if (x < border or x >= width - border or y < border or y >= height - border) {
-                        color.* = .{ 0, 0, 0, 255 };
-                    }
-                }
-            }
-
-            graphics.queue.writeTexture(
-                &.{ .texture = self.texture, .origin = .{} },
-                (&pixels).ptr,
-                (&pixels).len,
-                &.{ .bytes_per_row = 4 * width, .rows_per_image = height },
-                &.{ .width = width, .height = height },
-            );
         }
     };
 }
