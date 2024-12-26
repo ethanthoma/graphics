@@ -29,6 +29,7 @@ pub const Index = extern struct {
 pub const Uniform = struct {
     pub const buffer_type: BufferTypeClass = .uniform;
     pub const binding = 0;
+    pub const visibility = gpu.ShaderStage.vertex | gpu.ShaderStage.fragment;
 
     projection: Mat4x4(f32) align(16) = .{},
     view: Mat4x4(f32) align(16) = .{},
@@ -46,6 +47,7 @@ pub const Texture = struct {
     pub const buffer_type: BufferTypeClass = .texture;
     pub const binding = 1;
     pub const format: gpu.TextureFormat = .rgba8_unorm;
+    pub const visibility = gpu.ShaderStage.fragment;
 
     size: [2]usize,
     data: []const Color,

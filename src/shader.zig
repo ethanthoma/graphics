@@ -31,6 +31,57 @@ pub fn Shader(BufferTypes: []const type) type {
         } else count;
     };
 
+    const bind_group_layout_entries = &comptime outer: {
+        var bind_group_layout_entries: [uniformCount + textureCount]gpu.BindGroupLayoutEntry = undefined;
+        var index = 0;
+        for (BufferTypes) |BufferType| {
+            bind_group_layout_entries[index] = switch (BufferType.buffer_type) {
+                .uniform => inner: {
+                    defer index += 1;
+
+                    const visibility = if (@hasDecl(BufferType, "visibility"))
+                        BufferType.visibility
+                    else
+                        gpu.ShaderStage.vertex | gpu.ShaderStage.fragment;
+
+                    break :inner .{
+                        .binding = BufferType.binding,
+                        .visibility = visibility,
+                        .buffer = .{
+                            .type = .uniform,
+                            .min_binding_size = @sizeOf(BufferType),
+                        },
+                        .sampler = .{},
+                        .texture = .{},
+                        .storage_texture = .{},
+                    };
+                },
+                .texture => inner: {
+                    defer index += 1;
+
+                    const visibility = if (@hasDecl(BufferType, "visibility"))
+                        BufferType.visibility
+                    else
+                        gpu.ShaderStage.fragment;
+
+                    break :inner .{
+                        .binding = BufferType.binding,
+                        .visibility = visibility,
+                        .buffer = .{},
+                        .sampler = .{},
+                        .texture = .{
+                            .sample_type = .float,
+                        },
+                        .storage_texture = .{},
+                    };
+                },
+                else => continue,
+            };
+        }
+
+        break :outer bind_group_layout_entries;
+    };
+
     const DrawInfo = struct {
         index_size: usize = 1,
         index_buffer: ?*gpu.Buffer = null,
@@ -225,23 +276,21 @@ pub fn Shader(BufferTypes: []const type) type {
         uniforms: [uniformCount]*anyopaque = undefined,
         textures: [textureCount]*anyopaque = undefined,
 
-        bind_group_entries: [uniformCount + textureCount]?gpu.BindGroupEntry = undefined,
+        bind_group_entries: [uniformCount + textureCount]?gpu.BindGroupEntry = .{null} ** (uniformCount + textureCount),
 
-        texture_context: [textureCount]struct { *gpu.Texture, *gpu.TextureView } = undefined,
+        texture_context: [textureCount]?struct { *gpu.Texture, *gpu.TextureView } = .{null} ** textureCount,
 
-        bind_group_layout: *gpu.BindGroupLayout,
-        bind_group: *gpu.BindGroup,
+        bind_group_layout: *gpu.BindGroupLayout = undefined,
+        bind_group: *gpu.BindGroup = undefined,
 
         pub fn init(graphics: Graphics) !Self {
-            var self: Self = undefined;
+            var self: Self = .{};
 
-            self.buffers = .{null} ** BufferTypes.len;
-
-            //try initTexture(&self, graphics);
-
-            self.bind_group_entries = .{null} ** (uniformCount + textureCount);
-
-            try initBindGroupLayout(&self, graphics);
+            self.bind_group_layout = graphics.device.createBindGroupLayout(&.{
+                .label = "my bind group",
+                .entry_count = bind_group_layout_entries.len,
+                .entries = bind_group_layout_entries.ptr,
+            }) orelse return Error.FailedToCreateBindGroupLayout;
 
             return self;
         }
@@ -257,7 +306,13 @@ pub fn Shader(BufferTypes: []const type) type {
                     for (self.bind_group_entries, &entries) |from, *to| to.* = from.?;
                     break :blk entries;
                 };
-                try self.initBindGroup(graphics, entries);
+
+                self.bind_group = graphics.device.createBindGroup(&.{
+                    .label = "bind group",
+                    .layout = self.bind_group_layout,
+                    .entry_count = entries.len,
+                    .entries = entries.ptr,
+                }) orelse return Error.FailedToCreateBindGroup;
             }
 
             return retval;
@@ -273,12 +328,12 @@ pub fn Shader(BufferTypes: []const type) type {
                 }
             }
 
-            for (&self.texture_context) |texture_context| {
+            for (&self.texture_context) |maybe_texture_context| if (maybe_texture_context) |texture_context| {
                 const texture, const texture_view = texture_context;
                 texture_view.release();
                 texture.destroy();
                 texture.release();
-            }
+            };
 
             self.bind_group_layout.release();
         }
@@ -379,44 +434,6 @@ pub fn Shader(BufferTypes: []const type) type {
                 data.ptr,
                 data.len * @sizeOf(BufferType),
             );
-        }
-
-        fn initBindGroupLayout(self: *Self, graphics: Graphics) !void {
-            const entries = &[_]gpu.BindGroupLayoutEntry{ .{
-                .binding = 0,
-                .visibility = gpu.ShaderStage.vertex | gpu.ShaderStage.fragment,
-                .buffer = .{
-                    .type = .uniform,
-                    .min_binding_size = @sizeOf(Mesh.Uniform),
-                },
-                .sampler = .{},
-                .texture = .{},
-                .storage_texture = .{},
-            }, .{
-                .binding = 1,
-                .visibility = gpu.ShaderStage.fragment,
-                .buffer = .{},
-                .sampler = .{},
-                .texture = .{
-                    .sample_type = .float,
-                },
-                .storage_texture = .{},
-            } };
-
-            self.bind_group_layout = graphics.device.createBindGroupLayout(&.{
-                .label = "my bind group",
-                .entry_count = entries.len,
-                .entries = entries.ptr,
-            }) orelse return Error.FailedToCreateBindGroupLayout;
-        }
-
-        fn initBindGroup(self: *Self, graphics: Graphics, entries: []const gpu.BindGroupEntry) !void {
-            self.bind_group = graphics.device.createBindGroup(&.{
-                .label = "bind group",
-                .layout = self.bind_group_layout,
-                .entry_count = entries.len,
-                .entries = entries.ptr,
-            }) orelse return Error.FailedToCreateBindGroup;
         }
     };
 }
