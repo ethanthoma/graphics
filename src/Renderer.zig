@@ -9,7 +9,7 @@ const math = @import("math.zig");
 const Mat4x4 = math.Mat4x4;
 const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
-const Shader = @import("shader.zig").Shader(&ShaderTypes);
+const Shader = @import("shader.zig").Shader(Mesh);
 const DataType = math.DataType;
 const BufferTypeClass = @import("buffer.zig").BufferTypeClass;
 
@@ -26,8 +26,6 @@ const Error = error{
     FailedToBeginRenderPass,
     FailedToFinishEncoder,
 };
-
-const ShaderTypes = [_]type{ Mesh.Point, Mesh.Instance, Mesh.Uniform, Mesh.Texture };
 
 pipeline: *gpu.RenderPipeline,
 layout: *gpu.PipelineLayout,
@@ -47,10 +45,12 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
 
     try self.initDepth(graphics);
 
+    std.debug.print("loading shader...\n", .{});
     const shader_module = graphics.device.createShaderModule(&gpu.shaderModuleWGSLDescriptor(.{
         .code = @embedFile("./shader.wgsl"),
     })) orelse return Error.FailedToCreateShaderModule;
     defer shader_module.release();
+    std.debug.print("shader loaded\n", .{});
 
     // create render pipeline
     const color_targets = &[_]gpu.ColorTargetState{
@@ -72,22 +72,17 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
     };
 
     const point_attributes = &comptime getAttributes(Mesh.Point, 0);
-    const instance_attributes = &comptime getAttributes(Mesh.Instance, point_attributes.len);
 
     const buffers = &getVertexBufferLayouts(&[_]type{
         Mesh.Point,
-        Mesh.Instance,
     }, [_][]const gpu.VertexAttribute{
         point_attributes,
-        instance_attributes,
     });
 
-    self.shader = try Shader.init(graphics);
+    self.shader = try Shader.init(&graphics);
 
-    try self.shader.addBuffer(graphics, mesh.points);
-    try self.shader.addBuffer(graphics, mesh.instances);
-
-    try self.shader.addUniform(allocator, graphics, mesh.uniform);
+    try self.shader.addBuffer(allocator, mesh.points);
+    try self.shader.addBuffer(allocator, mesh.camera);
 
     const texture = Mesh.Texture{
         .size = .{ 256, 256 },
@@ -103,7 +98,7 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
                     255,
                 };
 
-                if (x < border or x >= width - border or y < border or y >= height - border) {
+                if (x < border or x >= 256 - border or y < border or y >= 256 - border) {
                     pixels[y * 256 + x] = .{ 0, 0, 0, 255 };
                 }
             };
@@ -111,6 +106,8 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
         },
     };
     try self.shader.addTexture(allocator, graphics, texture);
+
+    try self.shader.addBuffer(allocator, mesh.storage);
 
     const bind_group_layouts = &[_]*const gpu.BindGroupLayout{self.shader.bind_group_layout};
 
@@ -154,8 +151,8 @@ pub fn render(self: Renderer, graphics: Graphics, time: f32, camera: Camera) !vo
     _ = time;
 
     // update camera
-    self.shader.update(graphics, Mesh.Uniform, .projection, camera.getProjectionMatrix());
-    self.shader.update(graphics, Mesh.Uniform, .view, camera.getViewMatrix());
+    self.shader.update(graphics, Mesh.Camera, .projection, camera.getProjectionMatrix());
+    self.shader.update(graphics, Mesh.Camera, .view, camera.getViewMatrix());
 
     // setup target view
     const next_texture = getCurrentTextureView(graphics.surface) catch return;
@@ -265,15 +262,18 @@ fn attributeCount(comptime vertex_type: type) comptime_int {
 
     for (fields) |field| {
         switch (@typeInfo(field.type)) {
-            .vector => {
-                attribute_count += 1;
-            },
-            .@"struct" => {
-                if (!@hasDecl(field.type, "data_type")) @compileError("Data type of buffer must have decl data_type");
-                if (!@hasDecl(field.type, "shape")) @compileError("Data type of buffer must have decl shape");
-                if (std.meta.activeTag(@typeInfo(@TypeOf(field.type.shape))) != .@"struct") @compileError("Data type of buffer must have a shape tuple");
-                if (!@typeInfo(@TypeOf(field.type.shape)).@"struct".is_tuple) @compileError("Data type of buffer must have shape tuple longer than length 1");
-                attribute_count += field.type.shape.@"0";
+            .vector => attribute_count += 1,
+            .@"struct" => |t| {
+                switch (t.layout) {
+                    .@"packed" => attribute_count += 1,
+                    else => {
+                        if (!@hasDecl(field.type, "data_type")) @compileError("Data type of buffer must have decl data_type");
+                        if (!@hasDecl(field.type, "shape")) @compileError("Data type of buffer must have decl shape");
+                        if (std.meta.activeTag(@typeInfo(@TypeOf(field.type.shape))) != .@"struct") @compileError("Data type of buffer must have a shape tuple");
+                        if (!@typeInfo(@TypeOf(field.type.shape)).@"struct".is_tuple) @compileError("Data type of buffer must have shape tuple longer than length 1");
+                        attribute_count += field.type.shape.@"0";
+                    },
+                }
             },
             else => @compileError("unsupported type for vertex data"),
         }
@@ -288,6 +288,7 @@ fn getAttributes(
 ) [attributeCount(Vertex)]gpu.VertexAttribute {
     const getFormat = struct {
         pub fn f(length: comptime_int, T: type) gpu.VertexFormat {
+            if ((length == 1) and (T == u32)) return .uint32;
             if ((length == 2) and (T == f32)) return .float32x2;
             if ((length == 3) and (T == f32)) return .float32x3;
             if ((length == 4) and (T == f32)) return .float32x4;
@@ -326,28 +327,41 @@ fn getAttributes(
 
                     attribute_count += 1;
                 },
-                .@"struct" => {
-                    assert(@hasDecl(field.type, "data_type"));
-                    assert(@TypeOf(field.type.data_type) == DataType);
-                    assert(field.type.data_type == .Matrix);
+                .@"struct" => |t| {
+                    switch (t.layout) {
+                        .@"packed" => {
+                            const T = std.meta.Int(.unsigned, 8 * @sizeOf(t.backing_integer.?));
+                            attribute_list[i] = .{ .attribute = .{
+                                .format = getFormat(1, T),
+                                .offset = @offsetOf(Vertex, field.name),
+                                .shader_location = shader_location_offset + attribute_count,
+                            } };
+                            attribute_count += 1;
+                        },
+                        else => {
+                            assert(@hasDecl(field.type, "data_type"));
+                            assert(@TypeOf(field.type.data_type) == DataType);
+                            assert(field.type.data_type == .Matrix);
 
-                    const shape = field.type.shape;
+                            const shape = field.type.shape;
 
-                    const T = @typeInfo(std.meta.fieldInfo(field.type, .data).type).vector.child;
+                            const T = @typeInfo(std.meta.fieldInfo(field.type, .data).type).vector.child;
 
-                    var attributes: [shape.@"0"]gpu.VertexAttribute = undefined;
+                            var attributes: [shape.@"0"]gpu.VertexAttribute = undefined;
 
-                    for (&attributes, 0..) |*a, col| {
-                        a.* = .{
-                            .format = getFormat(shape.@"1", T),
-                            .offset = @offsetOf(Vertex, field.name) + (col * shape.@"1" * @sizeOf(T)),
-                            .shader_location = shader_location_offset + attribute_count,
-                        };
+                            for (&attributes, 0..) |*a, col| {
+                                a.* = .{
+                                    .format = getFormat(shape.@"1", T),
+                                    .offset = @offsetOf(Vertex, field.name) + (col * shape.@"1" * @sizeOf(T)),
+                                    .shader_location = shader_location_offset + attribute_count,
+                                };
 
-                        attribute_count += 1;
+                                attribute_count += 1;
+                            }
+
+                            attribute_list[i] = .{ .attributes = &attributes };
+                        },
                     }
-
-                    attribute_list[i] = .{ .attributes = &attributes };
                 },
                 else => @compileError("unsupported type for vertex data"),
             }
@@ -380,7 +394,7 @@ fn getVertexBufferLayoutCount(comptime Vertexs: []const type) comptime_int {
     for (Vertexs) |Vertex| {
         vertex_length += switch (Vertex.buffer_type) {
             .vertex, .instance => 1,
-            .index, .uniform, .texture => 0,
+            else => 0,
         };
     }
     return vertex_length;

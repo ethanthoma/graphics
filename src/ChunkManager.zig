@@ -7,7 +7,7 @@ const Noise = @import("noise.zig").Noise;
 
 pub const ChunkManager = @This();
 
-const RENDER_DISTANCE = 5;
+pub const RENDER_DISTANCE = 1;
 
 allocator: std.mem.Allocator,
 
@@ -107,8 +107,12 @@ fn unloadChunksOutOfRange(self: *ChunkManager, min: Vec3(i32), max: Vec3(i32)) !
     return needs_new_mesh;
 }
 
+// TODO: update in place instead of remaking array every time
 pub fn getMergedMesh(self: *ChunkManager) !Mesh {
-    var all_points = std.ArrayList(Mesh.Point).init(self.allocator);
+    var all_points = try std.ArrayList(Mesh.Point).initCapacity(
+        self.allocator,
+        Mesh.getMaxBufferSize(),
+    );
     defer all_points.deinit();
 
     var mesh_iter = self.chunk_meshes.iterator();
@@ -120,11 +124,7 @@ pub fn getMergedMesh(self: *ChunkManager) !Mesh {
     return .{
         .allocator = self.allocator,
         .points = try all_points.toOwnedSlice(),
-        .instances = try self.allocator.dupe(
-            Mesh.Instance,
-            &[_]Mesh.Instance{Mesh.makeInstance(.{ 0, 0, 0 })},
-        ),
-        .uniform = .{},
+        .camera = .{},
     };
 }
 
@@ -133,18 +133,16 @@ pub fn generateChunkTerrain(
     chunk_pos: Vec3(i32),
     data: *[Chunk.CHUNK_SIZE][Chunk.CHUNK_SIZE][Chunk.CHUNK_SIZE]Chunk.Block,
 ) void {
-    const base_x = chunk_pos[0] * Chunk.CHUNK_SIZE;
-    const base_z = chunk_pos[2] * Chunk.CHUNK_SIZE;
+    _ = self;
 
     for (0..Chunk.CHUNK_SIZE) |x| {
-        for (0..Chunk.CHUNK_SIZE) |z| {
-            const world_x = base_x + @as(i32, @intCast(x));
-            const world_z = base_z + @as(i32, @intCast(z));
-            const height = self.getTerrainHeight(world_x, world_z);
-
-            for (0..Chunk.CHUNK_SIZE) |y| {
-                const world_y = chunk_pos[1] * Chunk.CHUNK_SIZE + @as(i32, @intCast(y));
-                data[x][y][z] = if (world_y <= height) .solid else .air;
+        for (0..Chunk.CHUNK_SIZE) |y| {
+            for (0..Chunk.CHUNK_SIZE) |z| {
+                if (y == 0 and chunk_pos[1] == 0) {
+                    data[x][y][z] = .solid;
+                } else {
+                    data[x][y][z] = .air;
+                }
             }
         }
     }

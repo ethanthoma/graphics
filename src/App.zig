@@ -54,8 +54,8 @@ pub fn init(allocator: std.mem.Allocator) !*App {
 
     app.camera.lookAt(.{ 0, 0, 0 });
 
-    var mesh = try app.chunk_manager.update(app.camera.position) orelse try app.chunk_manager.getMergedMesh();
-    defer mesh.deinit();
+    const mesh = try app.chunk_manager.update(app.camera.position) orelse try app.chunk_manager.getMergedMesh();
+    //defer mesh.deinit();
 
     // init glfw
     _ = glfw.init(.{}) or return Error.FailedToInitializeGLFW;
@@ -122,10 +122,10 @@ fn update(self: *App) !void {
         self.camera.moveRelative(movement * @as(@TypeOf(movement), @splat(MOVEMENT_SPEED)));
 
         if (try self.chunk_manager.update(self.camera.position)) |mesh| {
-            defer mesh.deinit();
+            //defer mesh.deinit();
 
             if (self.renderer) |*renderer| {
-                try renderer.shader.addBuffer(self.graphics, mesh.points);
+                try renderer.shader.addBuffer(self.allocator, mesh.points);
             }
         }
     }

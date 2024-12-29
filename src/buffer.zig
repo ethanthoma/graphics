@@ -4,4 +4,5 @@ pub const BufferTypeClass = enum {
     index,
     uniform,
     texture,
+    storage,
 };

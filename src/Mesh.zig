@@ -3,42 +3,55 @@ const std = @import("std");
 const gpu = @import("wgpu");
 
 const math = @import("math.zig");
+const Vec3 = math.Vec3;
 const Vec3f = math.Vec3(f32);
 const Mat4x4 = math.Mat4x4;
 
 const Mesh = @This();
 const BufferTypeClass = @import("buffer.zig").BufferTypeClass;
 
-pub const Point = extern struct {
-    pub const buffer_type: BufferTypeClass = .vertex;
-    pub const slot = 0;
+pub const MAX_BUFFER_SIZE = 16 ^ 3 * @sizeOf(Point) * 5 ^ 3;
 
-    position: Position,
-    color: Color,
+pub const Point = struct {
+    pub const buffer_type: BufferTypeClass = .instance;
+    pub const vertex_count = 6;
 
-    pub const Position = Vec3f;
-    pub const Color = Vec3f;
+    voxel: packed struct {
+        position: Position,
+        normal: Normal,
+        texture: Point.Texture,
+    } align(4),
+
+    pub const Position = Vec3(u6);
+
+    pub const Normal = enum(u3) {
+        right,
+        left,
+        up,
+        down,
+        front,
+        back,
+    };
+
+    pub const Texture = enum(u7) {
+        grass,
+    };
 };
 
-pub const Uniform = struct {
+pub const Camera = struct {
     pub const buffer_type: BufferTypeClass = .uniform;
+    pub const bind_group = 0;
     pub const binding = 0;
     pub const visibility = gpu.ShaderStage.vertex | gpu.ShaderStage.fragment;
 
     projection: Mat4x4(f32) align(16) = .{},
     view: Mat4x4(f32) align(16) = .{},
-    _padding: u1 align(4) = undefined,
-};
-
-pub const Instance = extern struct {
-    pub const buffer_type: BufferTypeClass = .instance;
-    pub const slot = 1;
-
-    instance: Mat4x4(f32),
+    _padding: u1 align(16) = undefined,
 };
 
 pub const Texture = struct {
     pub const buffer_type: BufferTypeClass = .texture;
+    pub const bind_group = 0;
     pub const binding = 1;
     pub const format: gpu.TextureFormat = .rgba8_unorm;
     pub const visibility = gpu.ShaderStage.fragment;
@@ -49,56 +62,78 @@ pub const Texture = struct {
     pub const Color = @Vector(4, u8);
 };
 
+pub const Chunk = struct {
+    pub const buffer_type: BufferTypeClass = .storage;
+    pub const bind_group = 0;
+    pub const binding = 2;
+    pub const visibility = gpu.ShaderStage.fragment;
+
+    position: Vec3(i32) align(16),
+    _padding: u1 align(16) = undefined,
+};
+
 allocator: std.mem.Allocator,
 points: []const Point,
-instances: []const Instance,
-uniform: Uniform,
+camera: Camera,
+texture: Texture = .{ .size = undefined, .data = undefined },
+storage: []const Chunk = &[_]Chunk{.{ .position = .{ 0, 0, 0 } }},
 
-pub fn init(allocator: std.mem.Allocator, points: []const Point, instances: []const Instance) Mesh {
+pub fn init(allocator: std.mem.Allocator, points: []const Point) Mesh {
     return .{
         .allocator = allocator,
         .points = allocator.dupe(Point, points),
-        .instances = allocator.dupe(Instance, instances),
         .uniform = .{},
     };
 }
 
 pub fn deinit(self: *const Mesh) void {
     self.allocator.free(self.points);
-    self.allocator.free(self.instances);
 }
 
-pub fn makeInstance(position: Vec3f) Instance {
-    return .{ .instance = .{ .data = .{
-        1,           0,           0,           0,
-        0,           1,           0,           0,
-        0,           0,           1,           0,
-        position[0], position[1], position[2], 1,
-    } } };
+// TODO: this should be user defined in the struct type
+pub fn getMaxBufferSize() comptime_int {
+    const Render_Distance = @import("ChunkManager.zig").RENDER_DISTANCE;
+
+    const point = @sizeOf(Point);
+    const voxel = 6 * point;
+    const chunk = (16 * 16 * 16) * voxel;
+    const world = chunk * (((2 * Render_Distance) - 1) * ((2 * Render_Distance) - 1) * ((2 * Render_Distance) - 1));
+    return world;
 }
 
-pub fn getMaxBufferSize(mesh: Mesh) usize {
-    var max_buffer_size: usize = 0;
+// TODO: requirements like these can be auto-generated via shader.zig
 
-    inline for (comptime std.meta.fields(Mesh)) |field| {
-        const value = @field(mesh, field.name);
+pub fn getMaxUniformBufferBindingSize() comptime_int {
+    var size = 0;
+    for (@typeInfo(@This()).@"struct".decls) |decl| {
+        const field = @field(@This(), decl.name);
 
-        const buffer_size = switch (@typeInfo(field.type)) {
-            .pointer => |ptr| switch (ptr.size) {
-                .Slice => value.len * @sizeOf(ptr.child),
-                else => @compileError("shaders do not support pointers"),
-            },
-            else => @sizeOf(field.type),
-        };
+        if (@TypeOf(field) != type) continue;
+        if (!@hasDecl(field, "buffer_type")) continue;
+        if (field.buffer_type != .uniform) continue;
 
-        max_buffer_size = if (buffer_size > max_buffer_size) buffer_size else max_buffer_size;
+        size += @sizeOf(field);
+    }
+    return size;
+}
+
+pub fn maxVertexBufferArrayStride() comptime_int {
+    var stride = 0;
+    for (@typeInfo(@This()).@"struct".decls) |decl| {
+        const field = @field(@This(), decl.name);
+
+        if (@TypeOf(field) != type) continue;
+        if (!@hasDecl(field, "buffer_type")) continue;
+        if (field.buffer_type != .vertex and field.buffer_type != .instance) continue;
+
+        for (std.meta.fields(field)) |sub_field| {
+            if (stride < @sizeOf(sub_field.type)) stride = @sizeOf(sub_field.type);
+        }
     }
 
-    return max_buffer_size * 4;
+    return stride;
 }
 
-pub fn getMaxUniformBufferBindingSize(mesh: Mesh) usize {
-    _ = mesh;
-
-    return @sizeOf(Uniform);
+pub fn getMaxStorageBufferBindingSize() comptime_int {
+    return 1000;
 }

@@ -3,6 +3,7 @@ const assert = @import("std").debug.assert;
 
 const gpu = @import("wgpu");
 
+const BufferTypeClass = @import("buffer.zig").BufferTypeClass;
 const Mesh = @import("Mesh.zig");
 const Graphics = @import("Graphics.zig");
 
@@ -14,8 +15,44 @@ const Error = error{
     FailedToCreateBindGroup,
 };
 
-pub fn Shader(BufferTypes: []const type) type {
-    const uniformCount = blk: {
+pub fn Shader(Type: type) type {
+    const BufferTypes = struct {
+        fn find_types(comptime T: type, comptime arr: []type) []type {
+            var arr_new = arr;
+            return switch (@typeInfo(T)) {
+                .pointer => |info| find_types(info.child, arr),
+                .@"struct", .@"enum", .@"union" => if (@hasDecl(T, "buffer_type")) blk: {
+                    break :blk add(arr, T);
+                } else for (std.meta.fields(T)) |field| {
+                    arr_new = find_types(field.type, arr_new);
+                } else arr_new,
+                else => arr,
+            };
+        }
+
+        fn add(comptime arr: []type, comptime BufferType: type) []type {
+            var arr_new: [arr.len + 1]type = undefined;
+
+            return for (arr, 0..) |value, index| {
+                arr_new[index] = value;
+
+                if (value == BufferType) break arr;
+            } else blk: {
+                arr_new[arr.len] = BufferType;
+                break :blk &arr_new;
+            };
+        }
+
+        fn buffer_types(comptime T: type) []const type {
+            const tmp = find_types(T, &[_]type{});
+            var final: [tmp.len]type = undefined;
+            for (tmp, 0..) |value, index| final[index] = value;
+            const retval = final;
+            return &retval;
+        }
+    }.buffer_types(Type);
+
+    const uniform_count = blk: {
         var count = 0;
         break :blk inline for (BufferTypes) |BufferType| switch (BufferType.buffer_type) {
             .uniform => count += 1,
@@ -23,7 +60,7 @@ pub fn Shader(BufferTypes: []const type) type {
         } else count;
     };
 
-    const textureCount = blk: {
+    const texture_count = blk: {
         var count = 0;
         break :blk inline for (BufferTypes) |BufferType| switch (BufferType.buffer_type) {
             .texture => count += 1,
@@ -31,52 +68,62 @@ pub fn Shader(BufferTypes: []const type) type {
         } else count;
     };
 
+    const storage_count = blk: {
+        var count = 0;
+        break :blk inline for (BufferTypes) |BufferType| switch (BufferType.buffer_type) {
+            .storage => count += 1,
+            else => {},
+        } else count;
+    };
+
+    const bind_count = uniform_count + texture_count + storage_count;
+
     const bind_group_layout_entries = &comptime outer: {
-        var bind_group_layout_entries: [uniformCount + textureCount]gpu.BindGroupLayoutEntry = undefined;
+        var bind_group_layout_entries: [bind_count]gpu.BindGroupLayoutEntry = undefined;
+
         var index = 0;
         for (BufferTypes) |BufferType| {
-            bind_group_layout_entries[index] = switch (BufferType.buffer_type) {
-                .uniform => inner: {
-                    defer index += 1;
+            switch (BufferType.buffer_type) {
+                .uniform, .texture, .storage => |bind| {
+                    if (!@hasDecl(BufferType, "visibility"))
+                        @compileError(std.fmt.comptimePrint(
+                            "set visibility in {}",
+                            .{BufferType},
+                        ));
 
-                    const visibility = if (@hasDecl(BufferType, "visibility"))
-                        BufferType.visibility
-                    else
-                        gpu.ShaderStage.vertex | gpu.ShaderStage.fragment;
-
-                    break :inner .{
+                    var entry: gpu.BindGroupLayoutEntry = .{
                         .binding = BufferType.binding,
-                        .visibility = visibility,
-                        .buffer = .{
-                            .type = .uniform,
-                            .min_binding_size = @sizeOf(BufferType),
-                        },
+                        .visibility = BufferType.visibility,
+                        .buffer = .{},
                         .sampler = .{},
                         .texture = .{},
                         .storage_texture = .{},
                     };
-                },
-                .texture => inner: {
-                    defer index += 1;
 
-                    const visibility = if (@hasDecl(BufferType, "visibility"))
-                        BufferType.visibility
-                    else
-                        gpu.ShaderStage.fragment;
-
-                    break :inner .{
-                        .binding = BufferType.binding,
-                        .visibility = visibility,
-                        .buffer = .{},
-                        .sampler = .{},
-                        .texture = .{
-                            .sample_type = .float,
+                    switch (bind) {
+                        .uniform => {
+                            entry.buffer = .{
+                                .type = .uniform,
+                                .min_binding_size = @sizeOf(BufferType),
+                            };
                         },
-                        .storage_texture = .{},
-                    };
+                        .texture => {
+                            entry.texture = .{ .sample_type = .float };
+                        },
+                        .storage => {
+                            entry.buffer = .{
+                                .type = .storage,
+                                .min_binding_size = @sizeOf(BufferType),
+                            };
+                        },
+                        else => unreachable,
+                    }
+
+                    bind_group_layout_entries[index] = entry;
+                    index += 1;
                 },
                 else => continue,
-            };
+            }
         }
 
         break :outer bind_group_layout_entries;
@@ -94,51 +141,10 @@ pub fn Shader(BufferTypes: []const type) type {
     return struct {
         const Self = @This();
 
+        // TODO: make these less special like the storage buffer
         pub usingnamespace for (BufferTypes) |BufferType| {
             switch (BufferType.buffer_type) {
                 .uniform => break struct {
-                    pub fn addUniform(
-                        self: *Self,
-                        allocator: std.mem.Allocator,
-                        graphics: Graphics,
-                        data: anytype,
-                    ) !void {
-                        const Uniform = @TypeOf(data);
-
-                        const index = getUniformIndex(Uniform);
-
-                        const uniform = try allocator.create(Uniform);
-                        uniform.* = data;
-
-                        self.uniforms[index] = uniform;
-
-                        const buffer_index = inline for (BufferTypes, 0..) |_BufferType, i|
-                            if (_BufferType == Uniform) break i;
-
-                        const buffer = graphics.device.createBuffer(&.{
-                            .label = std.fmt.comptimePrint("uniform {} buffer", .{Uniform}),
-                            .usage = gpu.BufferUsage.copy_dst | gpu.BufferUsage.uniform,
-                            .size = @sizeOf(Uniform),
-                        }) orelse return Error.FailedToCreateBuffer;
-
-                        self.buffers[buffer_index] = buffer;
-
-                        graphics.queue.writeBuffer(
-                            buffer,
-                            0,
-                            self.uniforms[index],
-                            @sizeOf(Uniform),
-                        );
-
-                        self.bind_group_entries[index] = .{
-                            .binding = Uniform.binding,
-                            .buffer = buffer,
-                            .size = @sizeOf(Uniform),
-                        };
-
-                        _ = try tryInitBindGroup(self, graphics);
-                    }
-
                     pub fn update(
                         self: *const Self,
                         graphics: Graphics,
@@ -146,11 +152,12 @@ pub fn Shader(BufferTypes: []const type) type {
                         comptime field_tag: std.meta.FieldEnum(Uniform),
                         data: std.meta.fieldInfo(Uniform, field_tag).type,
                     ) void {
-                        const index = getUniformIndex(Uniform);
                         const buffer_index = inline for (BufferTypes, 0..) |_BufferType, i|
                             if (_BufferType == Uniform) break i;
 
-                        const uniform: *Uniform = @alignCast(@ptrCast(self.uniforms[index]));
+                        const binding_index = bindingIndex(Uniform);
+
+                        const uniform: *Uniform = @alignCast(@ptrCast(self.binding_ptrs[binding_index]));
 
                         const field_name = @tagName(field_tag);
                         const field = &@field(uniform, field_name);
@@ -164,25 +171,8 @@ pub fn Shader(BufferTypes: []const type) type {
                             @sizeOf(std.meta.fieldInfo(Uniform, field_tag).type),
                         );
                     }
-
-                    fn getUniformIndex(Uniform: type) comptime_int {
-                        comptime var index = 0;
-                        inline for (BufferTypes) |_BufferType| {
-                            switch (_BufferType.buffer_type) {
-                                .uniform => {
-                                    if (Uniform == _BufferType) break;
-                                    index += 1;
-                                },
-                                else => {},
-                            }
-                        } else @compileError(std.fmt.comptimePrint(
-                            "Passed in Uniform data {} doesn't match BufferTypes",
-                            .{Uniform},
-                        ));
-                        return index;
-                    }
                 },
-                else => {},
+                else => continue,
             }
         } else struct {};
 
@@ -197,16 +187,17 @@ pub fn Shader(BufferTypes: []const type) type {
                     ) !void {
                         const Texture = @TypeOf(data);
 
+                        const binding_index = bindingIndex(Texture);
+
                         const index = getTextureIndex(Texture);
 
                         const texture = try allocator.create(Texture);
                         texture.* = data;
 
-                        self.textures[index] = texture;
-
                         const width, const height = @as(Texture, data).size;
                         const format = Texture.format;
 
+                        // TODO: a lot of config can move into the Texture type
                         const gpu_texture = graphics.device.createTexture(&.{
                             .usage = gpu.TextureUsage.texture_binding | gpu.TextureUsage.copy_dst,
                             .size = .{
@@ -227,6 +218,9 @@ pub fn Shader(BufferTypes: []const type) type {
 
                         self.texture_context[index] = .{ gpu_texture, gpu_texture_view };
 
+                        self.binding_ptrs[binding_index] = @ptrCast(texture);
+
+                        // TODO: texture buffer expects a `.data` field, no need to enforce
                         const bytes = std.mem.sliceAsBytes(@as(Texture, data).data);
 
                         const bytes_per_row = bytes.len / height;
@@ -243,12 +237,13 @@ pub fn Shader(BufferTypes: []const type) type {
                             &.{ .width = @intCast(width), .height = @intCast(height) },
                         );
 
-                        self.bind_group_entries[uniformCount + index] = .{
+                        self.bind_group_entries[binding_index] = .{
                             .binding = Texture.binding,
                             .texture_view = gpu_texture_view,
                         };
 
-                        _ = try tryInitBindGroup(self, graphics);
+                        // TODO: a SET would make this faster but unneeded rn
+                        _ = try self.tryInitBindGroup();
                     }
 
                     fn getTextureIndex(Texture: type) comptime_int {
@@ -262,61 +257,40 @@ pub fn Shader(BufferTypes: []const type) type {
                                 else => {},
                             }
                         } else @compileError(std.fmt.comptimePrint(
-                            "Passed in Texture data {} doesn't match BufferTypes",
+                            "passed in Texture data {} doesn't match BufferTypes",
                             .{Texture},
                         ));
                         return index;
                     }
                 },
-                else => {},
+                else => continue,
             }
         } else struct {};
 
+        graphics: *const Graphics,
+
         buffers: [BufferTypes.len]?*gpu.Buffer = .{null} ** BufferTypes.len,
 
-        uniforms: [uniformCount]*anyopaque = undefined,
-        textures: [textureCount]*anyopaque = undefined,
+        binding_ptrs: [bind_count]*anyopaque = undefined,
 
-        bind_group_entries: [uniformCount + textureCount]?gpu.BindGroupEntry = .{null} ** (uniformCount + textureCount),
+        bind_group_entries: [bind_count]?gpu.BindGroupEntry = .{null} ** (bind_count),
 
-        texture_context: [textureCount]?struct { *gpu.Texture, *gpu.TextureView } = .{null} ** textureCount,
+        // TODO: maybe can merge with binding_ptrs? must be a way to track this and deinit properly
+        texture_context: [texture_count]?struct { *gpu.Texture, *gpu.TextureView } = .{null} ** texture_count,
 
         bind_group_layout: *gpu.BindGroupLayout = undefined,
         bind_group: *gpu.BindGroup = undefined,
 
-        pub fn init(graphics: Graphics) !Self {
-            var self: Self = .{};
+        pub fn init(graphics: *const Graphics) !Self {
+            var self: Self = .{ .graphics = graphics };
 
             self.bind_group_layout = graphics.device.createBindGroupLayout(&.{
-                .label = "my bind group",
+                .label = "bind group",
                 .entry_count = bind_group_layout_entries.len,
                 .entries = bind_group_layout_entries.ptr,
             }) orelse return Error.FailedToCreateBindGroupLayout;
 
             return self;
-        }
-
-        fn tryInitBindGroup(self: *Self, graphics: Graphics) !bool {
-            const retval = for (self.bind_group_entries) |entry| {
-                if (entry) |_| {} else break false;
-            } else true;
-
-            if (retval) {
-                const entries = &blk: {
-                    var entries: [uniformCount + textureCount]gpu.BindGroupEntry = undefined;
-                    for (self.bind_group_entries, &entries) |from, *to| to.* = from.?;
-                    break :blk entries;
-                };
-
-                self.bind_group = graphics.device.createBindGroup(&.{
-                    .label = "bind group",
-                    .layout = self.bind_group_layout,
-                    .entry_count = entries.len,
-                    .entries = entries.ptr,
-                }) orelse return Error.FailedToCreateBindGroup;
-            }
-
-            return retval;
         }
 
         pub fn deinit(self: *const Self) void {
@@ -337,6 +311,29 @@ pub fn Shader(BufferTypes: []const type) type {
             };
 
             self.bind_group_layout.release();
+        }
+
+        fn tryInitBindGroup(self: *Self) !bool {
+            const retval = for (self.bind_group_entries) |entry| {
+                if (entry) |_| {} else break false;
+            } else true;
+
+            if (retval) {
+                const entries = &blk: {
+                    var entries: [bind_count]gpu.BindGroupEntry = undefined;
+                    for (self.bind_group_entries, &entries) |from, *to| to.* = from.?;
+                    break :blk entries;
+                };
+
+                self.bind_group = self.graphics.device.createBindGroup(&.{
+                    .label = "bind group",
+                    .layout = self.bind_group_layout,
+                    .entry_count = entries.len,
+                    .entries = entries.ptr,
+                }) orelse return Error.FailedToCreateBindGroup;
+            }
+
+            return retval;
         }
 
         pub fn render(self: *const Self, render_pass: *gpu.RenderPassEncoder) void {
@@ -376,13 +373,16 @@ pub fn Shader(BufferTypes: []const type) type {
                             draw_info.index_size = @sizeOf(BufferTypes[index]);
                         },
                         .instance, .vertex => |buf_type| {
-                            const slot = BufferTypes[index].slot;
-                            render_pass.setVertexBuffer(slot, buffer.?, 0, buffer.?.getSize());
+                            render_pass.setVertexBuffer(getSlot(BufferTypes[index]), buffer.?, 0, buffer.?.getSize());
 
-                            if (buf_type == .instance) draw_info.instance_count = buffer.?.getSize() / @sizeOf(BufferTypes[index]);
+                            if (buf_type == .instance) {
+                                draw_info.instance_count = buffer.?.getSize() / @sizeOf(BufferTypes[index]);
+
+                                if (@hasDecl(BufferTypes[index], "vertex_count")) draw_info.vertex_count = BufferTypes[index].vertex_count;
+                            }
                             if (buf_type == .vertex) draw_info.vertex_count = buffer.?.getSize() / @sizeOf(BufferTypes[index]);
                         },
-                        .uniform, .texture => {},
+                        else => {},
                     }
                 }
             }
@@ -402,58 +402,157 @@ pub fn Shader(BufferTypes: []const type) type {
             }
         }
 
-        pub fn addBuffer(self: *Self, graphics: Graphics, data: anytype) !void {
-            if (@typeInfo(@TypeOf(data)) != .pointer) @compileError("Buffer data shoud be a slice");
-
-            const BufferType = @typeInfo(@TypeOf(data)).pointer.child;
-            const index = inline for (BufferTypes, 0..) |_BufferType, i| {
-                if (BufferType == _BufferType) break i;
-            } else @compileError("Removed buffer type is not one of the passed in shader types");
-
-            if (self.buffers[index]) |buffer| {
-                graphics.queue.submit(&[_]*const gpu.CommandBuffer{});
-                buffer.destroy();
-                buffer.release();
-                self.buffers[index] = null;
+        fn getSlot(comptime T: type) comptime_int {
+            comptime {
+                var slot = 0;
+                for (BufferTypes) |BufferType| {
+                    if (T == BufferType) return slot;
+                    switch (BufferType.buffer_type) {
+                        .vertex, .instance => slot += 1,
+                        else => {},
+                    }
+                } else @compileError("slot only defined for vertex and instance");
             }
-
-            self.buffers[index] = try createBuffer(graphics, data);
         }
 
-        fn createBuffer(graphics: Graphics, data: anytype) !*gpu.Buffer {
-            const BufferType = @typeInfo(@TypeOf(data)).pointer.child;
+        pub fn addBuffer(self: *Self, allocator: std.mem.Allocator, data: anytype) !void {
+            const buffer_index = bufferIndex(@TypeOf(data));
 
-            inline for (BufferTypes) |_BufferType| {
-                if (BufferType == _BufferType) break;
-            } else @compileError(std.fmt.comptimePrint(
-                "Buffer data was of type {} but expected one of {any}",
-                .{ BufferType, BufferTypes },
-            ));
+            if (self.buffers[buffer_index]) |buffer| {
+                self.graphics.queue.submit(&[_]*const gpu.CommandBuffer{});
+                buffer.destroy();
+                buffer.release();
+                self.buffers[buffer_index] = null;
+            }
+
+            self.buffers[buffer_index] = try self.createBuffer(allocator, data);
+        }
+
+        fn createBuffer(self: *Self, allocator: std.mem.Allocator, data: anytype) !*gpu.Buffer {
+            const BufferType = findBufferType(@TypeOf(data)) orelse
+                @compileError("data does not have buffer_type");
+
+            const label = std.fmt.comptimePrint("{s} {s} buffer", .{
+                @typeName(@TypeOf(data)),
+                @tagName(BufferType.buffer_type),
+            });
+
+            const is_container = comptime isContainer(@TypeOf(data));
+
+            const buffer_size = if (BufferType == @TypeOf(data))
+                @sizeOf(BufferType)
+            else if (is_container)
+                data.len * @sizeOf(BufferType);
 
             const usage = switch (BufferType.buffer_type) {
                 .vertex, .instance => gpu.BufferUsage.vertex,
                 .index => gpu.BufferUsage.index,
-                .uniform, .texture => @compileError("Do not use addBuffer for uniforms or textures"),
+                .uniform => gpu.BufferUsage.uniform,
+                .storage => gpu.BufferUsage.storage,
+                else => @compileError("unsupported buffer type"),
             } | gpu.BufferUsage.copy_dst;
 
-            std.debug.print("creating {s} buffer with size {}...\n", .{ @typeName(BufferType), data.len * @sizeOf(BufferType) });
-            const buffer = graphics.device.createBuffer(&.{
-                .label = std.fmt.comptimePrint("{s} buffer", .{@typeName(BufferType)}),
+            std.debug.print("creating {s} with size {}...\n", .{ label, buffer_size });
+            const buffer = self.graphics.device.createBuffer(&.{
+                .label = label,
                 .usage = usage,
-                .size = data.len * @sizeOf(BufferType),
+                .size = buffer_size,
             }) orelse return Error.FailedToCreateBuffer;
             std.debug.print("created\n", .{});
 
+            const ptr = if (is_container)
+                try allocator.dupe(BufferType, data)
+            else blk: {
+                const ptr = try allocator.create(@TypeOf(data));
+                ptr.* = data;
+                break :blk ptr;
+            };
+
+            // handle bind-able buffers
+            if (@hasDecl(BufferType, "binding")) {
+                const binding_index = bindingIndex(BufferType);
+                self.binding_ptrs[binding_index] = @ptrCast(ptr);
+
+                self.bind_group_entries[binding_index] = .{
+                    .binding = BufferType.binding,
+                    .buffer = buffer,
+                    .size = buffer_size,
+                };
+
+                _ = try self.tryInitBindGroup();
+            }
+
             std.debug.print("writing to {s} buffer...\n", .{@typeName(BufferType)});
-            graphics.queue.writeBuffer(
-                buffer,
-                0,
-                data.ptr,
-                data.len * @sizeOf(BufferType),
-            );
+            self.graphics.queue.writeBuffer(buffer, 0, @ptrCast(ptr), buffer_size);
             std.debug.print("writen\n", .{});
 
             return buffer;
+        }
+
+        fn isContainer(comptime T: type) bool {
+            const BufferType = findBufferType(T) orelse
+                @compileError("type T does not have buffer_type decl");
+
+            return switch (@typeInfo(T)) {
+                .pointer => |ptr| blk: {
+                    if (ptr.child != BufferType)
+                        @compileError("type T must be a buffer type, a slice/array of one, or a pointer to one");
+
+                    if (ptr.size == .Slice) break :blk true;
+
+                    break :blk false;
+                },
+                else => false,
+            };
+        }
+
+        fn bufferIndex(comptime T: type) comptime_int {
+            var index = 0;
+            return for (std.meta.fields(Type)) |field| {
+                if (field.type == T) break index else switch (@typeInfo(field.type)) {
+                    .pointer => |ptr| {
+                        if (bufferTypesContainType(ptr.child)) index += 1;
+                    },
+                    else => {
+                        if (bufferTypesContainType(field.type)) index += 1;
+                    },
+                }
+            } else @compileError("buffer type must be apart of your shader Type fields");
+        }
+
+        fn bindingIndex(comptime T: type) comptime_int {
+            comptime var index = 0;
+            index = for (BufferTypes) |BufferType| {
+                if (T == BufferType) break index;
+                switch (BufferType.buffer_type) {
+                    .uniform, .storage, .texture => index += 1,
+                    else => continue,
+                }
+            } else @compileError(std.fmt.comptimePrint(
+                "Passed in type {} doesn't exist in BufferTypes",
+                .{T},
+            ));
+
+            return index;
+        }
+
+        fn findBufferType(comptime T: type) ?type {
+            return switch (@typeInfo(T)) {
+                .pointer => |info| findBufferType(info.child),
+                .@"struct", .@"enum", .@"union" => if (@hasDecl(T, "buffer_type")) blk: {
+                    if (!bufferTypesContainType(T)) @compileError("buffer type does not exist in BufferTypes");
+                    break :blk T;
+                } else for (std.meta.fields(T)) |field| {
+                    if (findBufferType(field.type)) |S| break S;
+                } else null,
+                else => null,
+            };
+        }
+
+        fn bufferTypesContainType(comptime T: type) bool {
+            return for (BufferTypes) |BufferType| {
+                if (T == BufferType) break true;
+            } else false;
         }
     };
 }

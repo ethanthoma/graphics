@@ -40,9 +40,13 @@ pub fn init(mesh: Mesh, window: glfw.Window) !Graphics {
     defer adapter.release();
 
     // get device
+    const required_features = &[_]gpu.FeatureName{.vertex_writable_storage};
+
     const device_response = adapter.requestDeviceSync(&.{
         .label = "My Device",
         .required_limits = &getRequiredLimits(mesh, adapter),
+        .required_features = required_features.ptr,
+        .required_feature_count = required_features.len,
     });
     const device = switch (device_response.status) {
         .success => device_response.device.?,
@@ -67,6 +71,7 @@ pub fn init(mesh: Mesh, window: glfw.Window) !Graphics {
 }
 
 fn getRequiredLimits(mesh: Mesh, adapter: *gpu.Adapter) gpu.RequiredLimits {
+    _ = mesh;
     var supported_limits: gpu.SupportedLimits = .{
         .limits = .{},
     };
@@ -78,22 +83,29 @@ fn getRequiredLimits(mesh: Mesh, adapter: *gpu.Adapter) gpu.RequiredLimits {
     };
 
     // TODO: automate this; mostly just needs type information from shader.zig
-    required_limits.limits.max_vertex_attributes = 6;
+    required_limits.limits.max_vertex_attributes = 13;
     // std.meta.fields(Mesh.Point).len;
-    required_limits.limits.max_vertex_buffers = 2; // should find a way to automate this
-    required_limits.limits.max_inter_stage_shader_components = 6; // from shader code itself
+    required_limits.limits.max_vertex_buffers = 1; // should find a way to automate this
+    required_limits.limits.max_inter_stage_shader_components = 13; // from shader code itself
 
     // this needs to know an upper bound on my vertices
-    required_limits.limits.max_buffer_size = mesh.getMaxBufferSize();
+    required_limits.limits.max_buffer_size = Mesh.getMaxBufferSize();
     // should be derived from shader types passed into Graphics struct
-    required_limits.limits.max_vertex_buffer_array_stride = @sizeOf(Mesh.Instance);
+    required_limits.limits.max_vertex_buffer_array_stride = Mesh.maxVertexBufferArrayStride();
 
     required_limits.limits.max_texture_array_layers = 1;
     required_limits.limits.max_sampled_textures_per_shader_stage = 1;
 
     required_limits.limits.max_bind_groups = 1; // manual for now
-    required_limits.limits.max_uniform_buffers_per_shader_stage = 1; // same
-    required_limits.limits.max_uniform_buffer_binding_size = mesh.getMaxUniformBufferBindingSize();
+    required_limits.limits.max_bindings_per_bind_group = 3;
+
+    required_limits.limits.max_uniform_buffers_per_shader_stage = 3; // same
+    required_limits.limits.max_uniform_buffer_binding_size = Mesh.getMaxUniformBufferBindingSize();
+
+    required_limits.limits.max_storage_buffers_per_shader_stage = 3;
+    required_limits.limits.max_storage_buffer_binding_size = Mesh.getMaxStorageBufferBindingSize();
+    required_limits.limits.max_storage_textures_per_shader_stage = 3;
+    required_limits.limits.max_dynamic_storage_buffers_per_pipeline_layout = 3;
 
     required_limits.limits.min_uniform_buffer_offset_alignment = supported_limits.limits.min_uniform_buffer_offset_alignment;
     required_limits.limits.min_storage_buffer_offset_alignment = supported_limits.limits.min_storage_buffer_offset_alignment;
