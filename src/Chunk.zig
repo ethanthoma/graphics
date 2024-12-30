@@ -23,22 +23,18 @@ pub fn init() Chunk {
         .data = undefined,
     };
 
-    chunk.generateChunk();
+    for (0..CHUNK_SIZE) |x| {
+        for (0..CHUNK_SIZE) |y| {
+            for (0..CHUNK_SIZE) |z| {
+                chunk.data[x][y][z] = .air;
+            }
+        }
+    }
 
     return chunk;
 }
 
-fn generateChunk(self: *Chunk) void {
-    for (0..CHUNK_SIZE) |x| {
-        for (0..CHUNK_SIZE) |y| {
-            for (0..CHUNK_SIZE) |z| {
-                self.data[x][y][z] = .air;
-            }
-        }
-    }
-}
-
-pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i) !Mesh {
+pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i) !?Mesh {
     var points = std.ArrayList(Mesh.Point).init(allocator);
     defer points.deinit();
 
@@ -59,13 +55,23 @@ pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i)
         }
     }
 
-    if (points.items.len != 0)
-        std.debug.print("Chunk {}: generated mesh with {} vertices\n", .{ position, points.items.len });
+    if (points.items.len == 0) return null;
+
+    std.debug.print("Chunk {}: generated mesh with {} vertices\n", .{ position, points.items.len });
+
+    const indirect = Mesh.Indirect{
+        .vertex_count = 6,
+        .instance_count = @intCast(points.items.len),
+        .first_vertex = 0,
+        .first_instance = 0,
+    };
 
     return Mesh{
         .allocator = allocator,
         .points = try points.toOwnedSlice(),
+        .chunks = try allocator.dupe(Mesh.Chunk, &[_]Mesh.Chunk{.{ .position = position }}),
         .camera = .{},
+        .indirects = try allocator.dupe(Mesh.Indirect, &[_]Mesh.Indirect{indirect}),
     };
 }
 

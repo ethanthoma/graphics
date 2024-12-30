@@ -25,7 +25,8 @@ struct Chunk {
 
 @group(0) @binding(0) var<uniform> camera: Camera;
 @group(0) @binding(1) var texture: texture_2d<f32>;
-@group(0) @binding(2) var<storage, read> chunk_position: array<Chunk>;
+
+var<push_constant> chunk: Chunk;
 
 fn from_raw_voxel(raw: VoxelRaw) -> Voxel {
     let position_x = raw.voxel_data & 63u;
@@ -90,22 +91,33 @@ fn vs_main(
 
     let face_offset = get_face_offset(voxel.normal, local_coords);
 
-    let world_pos = voxel.position + face_offset;
+    let chunk_pos = 16 * vec3f(chunk.position);
+
+    let world_pos = voxel.position + face_offset + chunk_pos;
 
     let view_pos = camera.view * vec4f(world_pos, 1.0);
 
     out.position = camera.projection * view_pos;
     out.tex_coords = local_coords;
-    out.texture = voxel.texture;
+
+    switch (i32(chunk.position.y)) {
+        case -2: { out.texture = 0u; }
+        case -1: { out.texture = 1u; }
+        case 0: { out.texture = 2u; }
+        case 1: { out.texture = 3u; }
+    default: { out.texture = 0u; }
+    }
 
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    let shade = vec3f(f32(in.texture + 1) * 0.25);
+
     let tex_size = textureDimensions(texture);
     let mapped_coords = vec2i(in.tex_coords * vec2f(tex_size));
     let color = textureLoad(texture, mapped_coords, 0).rgb;
-    let linear_color = pow(color, vec3f(2.2));
+    let linear_color = pow(color * shade, vec3f(2.2));
     return vec4f(linear_color, 1.0);
 }

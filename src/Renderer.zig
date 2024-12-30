@@ -11,7 +11,6 @@ const Camera = @import("Camera.zig");
 const Mesh = @import("Mesh.zig");
 const Shader = @import("shader.zig").Shader(Mesh);
 const DataType = math.DataType;
-const BufferTypeClass = @import("buffer.zig").BufferTypeClass;
 
 const Renderer = @This();
 
@@ -73,6 +72,7 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
 
     const point_attributes = &comptime getAttributes(Mesh.Point, 0);
 
+    // TODO: auto generate this
     const buffers = &getVertexBufferLayouts(&[_]type{
         Mesh.Point,
     }, [_][]const gpu.VertexAttribute{
@@ -81,8 +81,8 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
 
     self.shader = try Shader.init(&graphics);
 
-    try self.shader.addBuffer(allocator, mesh.points);
-    try self.shader.addBuffer(allocator, mesh.camera);
+    try self.shader.set(allocator, mesh.points);
+    try self.shader.set(allocator, mesh.camera);
 
     const texture = Mesh.Texture{
         .size = .{ 256, 256 },
@@ -105,17 +105,29 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
             break :blk pixels;
         },
     };
-    try self.shader.addTexture(allocator, graphics, texture);
-
-    try self.shader.addBuffer(allocator, mesh.storage);
+    try self.shader.set(allocator, texture);
+    try self.shader.set(allocator, mesh.chunks);
+    try self.shader.set(allocator, mesh.indirects);
 
     const bind_group_layouts = &[_]*const gpu.BindGroupLayout{self.shader.bind_group_layout};
 
-    self.layout = graphics.device.createPipelineLayout(&.{
-        .label = "my pipeline layout",
+    var pipeline_layout_descriptor = gpu.PipelineLayoutDescriptor{
+        .label = "pipeline layout",
         .bind_group_layout_count = bind_group_layouts.len,
         .bind_group_layouts = bind_group_layouts.ptr,
-    }) orelse return Error.FailedToCreatePipelineLayout;
+    };
+
+    // TODO: automate this
+    if (Mesh.getMaxPushSize() > 0)
+        pipeline_layout_descriptor = pipeline_layout_descriptor.withPushConstantRanges(
+            1,
+            (&[_]gpu.PushConstantRange{
+                .{ .stages = Mesh.Chunk.visibility, .start = 0, .end = @sizeOf(Mesh.Chunk) },
+            }).ptr,
+        );
+
+    self.layout = graphics.device.createPipelineLayout(&pipeline_layout_descriptor) orelse
+        return Error.FailedToCreatePipelineLayout;
 
     self.pipeline = graphics.device.createRenderPipeline(&gpu.RenderPipelineDescriptor{
         .vertex = gpu.VertexState{
@@ -160,7 +172,7 @@ pub fn render(self: Renderer, graphics: Graphics, time: f32, camera: Camera) !vo
 
     // setup encoder
     const encoder = graphics.device.createCommandEncoder(&.{
-        .label = "my command encoder",
+        .label = "command encoder",
     }) orelse return Error.FailedToCreateCommandEncoder;
     defer encoder.release();
 
@@ -172,7 +184,7 @@ pub fn render(self: Renderer, graphics: Graphics, time: f32, camera: Camera) !vo
     }};
 
     const render_pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor{
-        .label = "my render pass",
+        .label = "render pass",
         .color_attachment_count = color_attachments.len,
         .color_attachments = color_attachments.ptr,
         .depth_stencil_attachment = &.{
@@ -203,14 +215,14 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
 
     switch (surface_texture.status) {
         .success => return surface_texture.texture.createView(&.{
-            .label = "Surface texture view",
+            .label = "surface texture view",
             .format = surface_texture.texture.getFormat(),
             .dimension = .@"2d",
             .mip_level_count = 1,
             .array_layer_count = 1,
         }) orelse Error.FailedToCreateView,
         else => {
-            std.debug.print("Failed to get current texture: {}\n", .{surface_texture.status});
+            std.debug.print("failed to get current texture: {}\n", .{surface_texture.status});
             return Error.FailedToGetCurrentTexture;
         },
     }
@@ -267,10 +279,10 @@ fn attributeCount(comptime vertex_type: type) comptime_int {
                 switch (t.layout) {
                     .@"packed" => attribute_count += 1,
                     else => {
-                        if (!@hasDecl(field.type, "data_type")) @compileError("Data type of buffer must have decl data_type");
-                        if (!@hasDecl(field.type, "shape")) @compileError("Data type of buffer must have decl shape");
-                        if (std.meta.activeTag(@typeInfo(@TypeOf(field.type.shape))) != .@"struct") @compileError("Data type of buffer must have a shape tuple");
-                        if (!@typeInfo(@TypeOf(field.type.shape)).@"struct".is_tuple) @compileError("Data type of buffer must have shape tuple longer than length 1");
+                        if (!@hasDecl(field.type, "data_type")) @compileError("data type of buffer must have decl data_type");
+                        if (!@hasDecl(field.type, "shape")) @compileError("data type of buffer must have decl shape");
+                        if (std.meta.activeTag(@typeInfo(@TypeOf(field.type.shape))) != .@"struct") @compileError("data type of buffer must have a shape tuple");
+                        if (!@typeInfo(@TypeOf(field.type.shape)).@"struct".is_tuple) @compileError("data type of buffer must have shape tuple longer than length 1");
                         attribute_count += field.type.shape.@"0";
                     },
                 }
@@ -298,12 +310,8 @@ fn getAttributes(
 
     return comptime blk: {
         if (!@hasDecl(Vertex, "buffer_type")) @compileError(std.fmt.comptimePrint(
-            "Vertex type {} needs decl `buffer_type`",
+            "vertex type {} needs decl `buffer_type`",
             .{Vertex},
-        ));
-        if (@TypeOf(Vertex.buffer_type) != BufferTypeClass) @compileError(std.fmt.comptimePrint(
-            "Vertex type {} needs decl `buffer_type` with type {}",
-            .{ Vertex, BufferTypeClass },
         ));
 
         const fields = @typeInfo(Vertex).@"struct".fields;

@@ -7,26 +7,23 @@ const Noise = @import("noise.zig").Noise;
 
 pub const ChunkManager = @This();
 
-pub const RENDER_DISTANCE = 1;
+pub const RENDER_DISTANCE = 2;
 
 allocator: std.mem.Allocator,
 
 noise: Noise = Noise.init(12345),
-chunks: std.AutoArrayHashMap(Vec3(i32), Chunk),
-chunk_meshes: std.AutoArrayHashMap(Vec3(i32), Mesh),
+meshes: std.AutoArrayHashMap(Vec3(i32), ?Mesh),
 
 pub fn init(allocator: std.mem.Allocator) ChunkManager {
     return .{
         .allocator = allocator,
-        .chunks = std.AutoArrayHashMap(Vec3(i32), Chunk).init(allocator),
-        .chunk_meshes = std.AutoArrayHashMap(Vec3(i32), Mesh).init(allocator),
+        .meshes = std.AutoArrayHashMap(Vec3(i32), ?Mesh).init(allocator),
     };
 }
 
 pub fn deinit(self: *ChunkManager) void {
-    for (self.chunk_meshes.values()) |*mesh| mesh.deinit();
-    self.chunk_meshes.deinit();
-    self.chunks.deinit();
+    for (self.meshes.values()) |*mesh| mesh.deinit();
+    self.meshes.deinit();
     self.allocator.destroy(self);
 }
 
@@ -67,15 +64,15 @@ fn loadChunksInRange(self: *ChunkManager, min: Vec3(i32), max: Vec3(i32)) !bool 
             while (x <= max[0]) : (x += 1) {
                 const pos = Vec3(i32){ x, y, z };
 
-                if (self.chunks.contains(pos)) continue;
+                if (self.meshes.contains(pos)) continue;
                 needs_new_mesh = true;
 
                 var chunk: Chunk = .{ .data = undefined };
+
                 self.generateChunkTerrain(pos, &chunk.data);
-                try self.chunks.put(pos, chunk);
 
                 const mesh = try chunk.generateMesh(self.allocator, pos);
-                try self.chunk_meshes.put(pos, mesh);
+                try self.meshes.put(pos, mesh);
             }
         }
     }
@@ -86,21 +83,15 @@ fn loadChunksInRange(self: *ChunkManager, min: Vec3(i32), max: Vec3(i32)) !bool 
 fn unloadChunksOutOfRange(self: *ChunkManager, min: Vec3(i32), max: Vec3(i32)) !bool {
     var needs_new_mesh = false;
 
-    var chunk_iter = self.chunks.iterator();
-    while (chunk_iter.next()) |entry| {
-        const pos = entry.key_ptr.*;
-
-        if (pos[0] < min[0] or pos[0] > max[0] or
+    for (self.meshes.keys()) |pos| {
+        if (!(pos[0] < min[0] or pos[0] > max[0] or
             pos[1] < min[1] or pos[1] > max[1] or
-            pos[2] < min[2] or pos[2] > max[2])
-        {
-            if (self.chunk_meshes.getPtr(pos)) |mesh| {
+            pos[2] < min[2] or pos[2] > max[2])) continue;
+        if (self.meshes.fetchSwapRemove(pos)) |entry| {
+            if (entry.value) |mesh| {
                 mesh.deinit();
                 needs_new_mesh = true;
             }
-
-            _ = self.chunk_meshes.swapRemove(pos);
-            _ = self.chunks.swapRemove(pos);
         }
     }
 
@@ -113,18 +104,38 @@ pub fn getMergedMesh(self: *ChunkManager) !Mesh {
         self.allocator,
         Mesh.getMaxBufferSize(),
     );
-    defer all_points.deinit();
 
-    var mesh_iter = self.chunk_meshes.iterator();
-    while (mesh_iter.next()) |entry| {
-        const mesh = entry.value_ptr;
-        try all_points.appendSlice(mesh.points);
+    var all_chunks = try std.ArrayList(Mesh.Chunk).initCapacity(
+        self.allocator,
+        Mesh.getMaxStorageBufferBindingSize(),
+    );
+
+    var all_indirects = try std.ArrayList(Mesh.Indirect).initCapacity(
+        self.allocator,
+        (Mesh.getMaxStorageBufferBindingSize() / @sizeOf(Mesh.Chunk)) * @sizeOf(Mesh.Indirect),
+    );
+
+    var offset: u32 = 0;
+    for (self.meshes.keys(), 0..) |position, index| {
+        _ = index;
+        if (self.meshes.get(position).?) |mesh| {
+            std.debug.print("POS: {}, OFF: {}\n", .{ position, offset });
+            try all_points.appendSlice(mesh.points);
+            try all_chunks.appendSlice(mesh.chunks);
+            var indirect = mesh.indirects[0];
+            if (mesh.indirects.len != 1) std.debug.print("WTF", .{});
+            indirect.first_instance += offset;
+            offset += indirect.instance_count;
+            try all_indirects.append(indirect);
+        }
     }
 
     return .{
         .allocator = self.allocator,
         .points = try all_points.toOwnedSlice(),
+        .chunks = try all_chunks.toOwnedSlice(),
         .camera = .{},
+        .indirects = try all_indirects.toOwnedSlice(),
     };
 }
 
@@ -133,16 +144,18 @@ pub fn generateChunkTerrain(
     chunk_pos: Vec3(i32),
     data: *[Chunk.CHUNK_SIZE][Chunk.CHUNK_SIZE][Chunk.CHUNK_SIZE]Chunk.Block,
 ) void {
-    _ = self;
+    const base_x = chunk_pos[0] * Chunk.CHUNK_SIZE;
+    const base_z = chunk_pos[2] * Chunk.CHUNK_SIZE;
 
     for (0..Chunk.CHUNK_SIZE) |x| {
-        for (0..Chunk.CHUNK_SIZE) |y| {
-            for (0..Chunk.CHUNK_SIZE) |z| {
-                if (y == 0 and chunk_pos[1] == 0) {
-                    data[x][y][z] = .solid;
-                } else {
-                    data[x][y][z] = .air;
-                }
+        for (0..Chunk.CHUNK_SIZE) |z| {
+            const world_x = base_x + @as(i32, @intCast(x));
+            const world_z = base_z + @as(i32, @intCast(z));
+            const height = self.getTerrainHeight(world_x, world_z);
+
+            for (0..Chunk.CHUNK_SIZE) |y| {
+                const world_y = (chunk_pos[1] * Chunk.CHUNK_SIZE) + @as(i32, @intCast(y));
+                data[x][y][z] = if (world_y <= height) .solid else .air;
             }
         }
     }

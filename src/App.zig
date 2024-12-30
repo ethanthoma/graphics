@@ -125,9 +125,13 @@ fn update(self: *App) !void {
             //defer mesh.deinit();
 
             if (self.renderer) |*renderer| {
-                try renderer.shader.addBuffer(self.allocator, mesh.points);
+                try renderer.shader.set(self.allocator, mesh.points);
+                try renderer.shader.set(self.allocator, mesh.indirects);
+                try renderer.shader.set(self.allocator, mesh.chunks);
             }
         }
+
+        std.debug.print("CURR: {}\n", .{std.math.round(self.camera.position / @as(Vec3f, @splat(16)))});
     }
 
     const rotation = self.input.mouse_delta;
