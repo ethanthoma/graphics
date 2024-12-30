@@ -130,8 +130,6 @@ fn update(self: *App) !void {
                 try renderer.shader.set(self.allocator, mesh.chunks);
             }
         }
-
-        std.debug.print("CURR: {}\n", .{std.math.round(self.camera.position / @as(Vec3f, @splat(16)))});
     }
 
     const rotation = self.input.mouse_delta;

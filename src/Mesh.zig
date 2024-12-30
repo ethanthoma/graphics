@@ -70,7 +70,7 @@ pub const Chunk align(16) = struct {
     position: Vec3(i32),
 };
 
-pub const Indirect = packed struct {
+pub const Indirect = packed struct(u128) {
     pub const shader_type = .buffer;
     pub const buffer_type = .indirect;
 
@@ -102,10 +102,11 @@ pub fn deinit(self: *const Mesh) void {
 // TODO: this should be user defined in the struct type
 pub fn getMaxBufferSize() comptime_int {
     const chunk_dim = (2 * @import("ChunkManager.zig").RENDER_DISTANCE) + 1;
+    const chunk_size = @import("Chunk.zig").CHUNK_SIZE;
 
     const point = @sizeOf(Point);
     const voxel = 6 * point;
-    const chunk = (16 * 16 * 16) * voxel;
+    const chunk = (chunk_size * chunk_size * chunk_size) * voxel;
     const world = chunk * (chunk_dim * chunk_dim * chunk_dim);
     return world;
 }

@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 const Vec3 = @import("math.zig").Vec3;
 const Chunk = @import("Chunk.zig");
@@ -87,6 +88,7 @@ fn unloadChunksOutOfRange(self: *ChunkManager, min: Vec3(i32), max: Vec3(i32)) !
         if (!(pos[0] < min[0] or pos[0] > max[0] or
             pos[1] < min[1] or pos[1] > max[1] or
             pos[2] < min[2] or pos[2] > max[2])) continue;
+
         if (self.meshes.fetchSwapRemove(pos)) |entry| {
             if (entry.value) |mesh| {
                 mesh.deinit();
@@ -119,11 +121,14 @@ pub fn getMergedMesh(self: *ChunkManager) !Mesh {
     for (self.meshes.keys(), 0..) |position, index| {
         _ = index;
         if (self.meshes.get(position).?) |mesh| {
-            std.debug.print("POS: {}, OFF: {}\n", .{ position, offset });
             try all_points.appendSlice(mesh.points);
-            try all_chunks.appendSlice(mesh.chunks);
+
+            assert(mesh.chunks.len == 1);
+            try all_chunks.append(mesh.chunks[0]);
+
+            assert(mesh.indirects.len == 1);
             var indirect = mesh.indirects[0];
-            if (mesh.indirects.len != 1) std.debug.print("WTF", .{});
+
             indirect.first_instance += offset;
             offset += indirect.instance_count;
             try all_indirects.append(indirect);

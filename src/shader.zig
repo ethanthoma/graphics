@@ -254,6 +254,7 @@ pub fn Shader(Type: type) type {
             render_pass.setBindGroup(0, self.bind_group, 0, null);
 
             //TODO: handle multiple constants
+            //FIX: this
             if (Constants.len == 1) {
                 const Constant = Constants[0];
 
@@ -263,15 +264,18 @@ pub fn Shader(Type: type) type {
                     if (size != 0) {
                         const ptr: [*]const Constant = @alignCast(@ptrCast(data));
 
-                        for (ptr[0..size], 0..) |constant, index| {
+                        for (0..size) |index| {
                             render_pass.setPushConstants(
                                 Constant.visibility,
                                 0,
                                 @sizeOf(Constant),
-                                &constant,
+                                &ptr[index],
                             );
 
-                            render_pass.drawIndirect(draw_info.indirect_buffer.?, index);
+                            render_pass.drawIndirect(
+                                draw_info.indirect_buffer.?,
+                                index * @sizeOf(Mesh.Indirect),
+                            );
                         }
                     }
                 }

@@ -37,8 +37,8 @@ fn from_raw_voxel(raw: VoxelRaw) -> Voxel {
 
     return Voxel(
         vec3f(f32(position_x), f32(position_y), f32(position_z)),
-        u32(normal),
-        u32(texture),
+        (normal),
+        (texture),
     );
 }
 
@@ -91,7 +91,7 @@ fn vs_main(
 
     let face_offset = get_face_offset(voxel.normal, local_coords);
 
-    let chunk_pos = 16 * vec3f(chunk.position);
+    let chunk_pos = vec3f(32 * chunk.position);
 
     let world_pos = voxel.position + face_offset + chunk_pos;
 
@@ -99,25 +99,16 @@ fn vs_main(
 
     out.position = camera.projection * view_pos;
     out.tex_coords = local_coords;
-
-    switch (i32(chunk.position.y)) {
-        case -2: { out.texture = 0u; }
-        case -1: { out.texture = 1u; }
-        case 0: { out.texture = 2u; }
-        case 1: { out.texture = 3u; }
-    default: { out.texture = 0u; }
-    }
+    out.texture = voxel.texture;
 
     return out;
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    let shade = vec3f(f32(in.texture + 1) * 0.25);
-
     let tex_size = textureDimensions(texture);
     let mapped_coords = vec2i(in.tex_coords * vec2f(tex_size));
     let color = textureLoad(texture, mapped_coords, 0).rgb;
-    let linear_color = pow(color * shade, vec3f(2.2));
+    let linear_color = pow(color, vec3f(2.2));
     return vec4f(linear_color, 1.0);
 }
