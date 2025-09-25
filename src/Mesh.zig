@@ -38,12 +38,12 @@ pub const Point = struct {
     };
 };
 
-pub const Camera align(16) = struct {
+pub const Camera = struct {
     pub const shader_type = .buffer;
     pub const buffer_type = .uniform;
     pub const bind_group = 0;
     pub const binding = 0;
-    pub const visibility = gpu.ShaderStage.vertex | gpu.ShaderStage.fragment;
+    pub const visibility = gpu.ShaderStages.vertex | gpu.ShaderStages.fragment;
 
     projection: Mat4x4(f32) = .{},
     view: Mat4x4(f32) = .{},
@@ -55,7 +55,7 @@ pub const Texture = struct {
     pub const bind_group = 0;
     pub const binding = 1;
     pub const format: gpu.TextureFormat = .rgba8_unorm;
-    pub const visibility = gpu.ShaderStage.fragment;
+    pub const visibility = gpu.ShaderStages.fragment;
 
     size: [2]usize,
     data: []const Color,
@@ -63,9 +63,9 @@ pub const Texture = struct {
     pub const Color = @Vector(4, u8);
 };
 
-pub const Chunk align(16) = struct {
+pub const Chunk = struct {
     pub const shader_type = .constant;
-    pub const visibility = gpu.ShaderStage.vertex;
+    pub const visibility = gpu.ShaderStages.vertex;
 
     position: Vec3(i32),
 };

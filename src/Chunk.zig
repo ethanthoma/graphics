@@ -35,8 +35,8 @@ pub fn init() Chunk {
 }
 
 pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i) !?Mesh {
-    var points = std.ArrayList(Mesh.Point).init(allocator);
-    defer points.deinit();
+    var points = std.ArrayList(Mesh.Point){};
+    defer points.deinit(allocator);
 
     for (0..CHUNK_SIZE) |x| {
         for (0..CHUNK_SIZE) |y| {
@@ -45,12 +45,12 @@ pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i)
 
                 const block_pos = Vec3(u6){ @intCast(x), @intCast(y), @intCast(z) };
 
-                try addFace(&points, block_pos, .right, .grass);
-                try addFace(&points, block_pos, .left, .grass);
-                try addFace(&points, block_pos, .up, .grass);
-                try addFace(&points, block_pos, .down, .grass);
-                try addFace(&points, block_pos, .front, .grass);
-                try addFace(&points, block_pos, .back, .grass);
+                try addFace(allocator, &points, block_pos, .right, .grass);
+                try addFace(allocator, &points, block_pos, .left, .grass);
+                try addFace(allocator, &points, block_pos, .up, .grass);
+                try addFace(allocator, &points, block_pos, .down, .grass);
+                try addFace(allocator, &points, block_pos, .front, .grass);
+                try addFace(allocator, &points, block_pos, .back, .grass);
             }
         }
     }
@@ -68,7 +68,7 @@ pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i)
 
     return Mesh{
         .allocator = allocator,
-        .points = try points.toOwnedSlice(),
+        .points = try points.toOwnedSlice(allocator),
         .chunks = try allocator.dupe(Mesh.Chunk, &[_]Mesh.Chunk{.{ .position = position }}),
         .camera = .{},
         .indirects = try allocator.dupe(Mesh.Indirect, &[_]Mesh.Indirect{indirect}),
@@ -76,12 +76,13 @@ pub fn generateMesh(self: *Chunk, allocator: std.mem.Allocator, position: Vec3i)
 }
 
 fn addFace(
+    allocator: std.mem.Allocator,
     points: *std.ArrayList(Mesh.Point),
     position: Vec3(u6),
     normal: Mesh.Point.Normal,
     texture: Mesh.Point.Texture,
 ) !void {
-    try points.append(.{
+    try points.append(allocator, .{
         .voxel = .{
             .position = position,
             .normal = normal,

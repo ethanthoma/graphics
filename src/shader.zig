@@ -91,14 +91,14 @@ pub fn Shader(Type: type) type {
             var entry: gpu.BindGroupLayoutEntry = .{
                 .binding = Bind.binding,
                 .visibility = Bind.visibility,
-                .buffer = .{},
-                .sampler = .{},
-                .texture = .{},
-                .storage_texture = .{},
             };
 
             if (Bind.shader_type == .texture) {
-                entry.texture = .{ .sample_type = .float };
+                entry.texture = .{
+                    .sample_type = .float,
+                    .view_dimension = .@"2d",
+                    .multisampled = @intFromBool(false),
+                };
             } else switch (Bind.buffer_type) {
                 .uniform => entry.buffer = .{
                     .type = .uniform,
@@ -136,7 +136,7 @@ pub fn Shader(Type: type) type {
             var self: Self = .{ .graphics = graphics };
 
             self.bind_group_layout = graphics.device.createBindGroupLayout(&.{
-                .label = "bind group",
+                .label = gpu.StringView.fromSlice("bind group"),
                 .entry_count = bind_group_layout_entries.len,
                 .entries = bind_group_layout_entries.ptr,
             }) orelse return Error.FailedToCreateBindGroupLayout;
@@ -177,7 +177,7 @@ pub fn Shader(Type: type) type {
                 };
 
                 self.bind_group = self.graphics.device.createBindGroup(&.{
-                    .label = "bind group",
+                    .label = gpu.StringView.fromSlice("bind group"),
                     .layout = self.bind_group_layout,
                     .entry_count = entries.len,
                     .entries = entries.ptr,
@@ -262,7 +262,7 @@ pub fn Shader(Type: type) type {
                     const data, const size = context;
 
                     if (size != 0) {
-                        const ptr: [*]const Constant = @alignCast(@ptrCast(data));
+                        const ptr: [*]const Constant = @ptrCast(@alignCast(data));
 
                         for (0..size) |index| {
                             render_pass.setPushConstants(
@@ -314,9 +314,9 @@ pub fn Shader(Type: type) type {
         pub fn set(self: *Self, allocator: std.mem.Allocator, data: anytype) !void {
             const shader_type = comptime getShaderType(@TypeOf(data)) orelse
                 @compileError(std.fmt.comptimePrint(
-                "type {} is not a shader type",
-                .{@TypeOf(data)},
-            ));
+                    "type {} is not a shader type",
+                    .{@TypeOf(data)},
+                ));
 
             switch (shader_type) {
                 .constant => try self.setConstant(allocator, data),
@@ -342,9 +342,9 @@ pub fn Shader(Type: type) type {
             if (self.constant_context[index]) |context| {
                 const ptr, const size = context;
                 if (size == 0) {
-                    allocator.destroy(@as(*Constant, @alignCast(@ptrCast(ptr))));
+                    allocator.destroy(@as(*Constant, @ptrCast(@alignCast(ptr))));
                 } else {
-                    allocator.free(@as([*]const Constant, @alignCast(@ptrCast(ptr)))[0..size]);
+                    allocator.free(@as([*]const Constant, @ptrCast(@alignCast(ptr)))[0..size]);
                 }
                 self.constant_context[index] = null;
             }
@@ -375,7 +375,7 @@ pub fn Shader(Type: type) type {
             ));
 
             if (self.buffers[index]) |buffer| {
-                self.graphics.queue.submit(&[_]*const gpu.CommandBuffer{});
+                self.graphics.queue.submit(&.{});
                 buffer.destroy();
                 buffer.release();
                 self.buffers[index] = null;
@@ -394,17 +394,17 @@ pub fn Shader(Type: type) type {
                 data.len * @sizeOf(Buffer);
 
             const usage = switch (Buffer.buffer_type) {
-                .vertex, .instance => gpu.BufferUsage.vertex,
-                .index => gpu.BufferUsage.index,
-                .uniform => gpu.BufferUsage.uniform,
-                .storage => gpu.BufferUsage.storage,
-                .indirect => gpu.BufferUsage.indirect,
+                .vertex, .instance => gpu.BufferUsages.vertex,
+                .index => gpu.BufferUsages.index,
+                .uniform => gpu.BufferUsages.uniform,
+                .storage => gpu.BufferUsages.storage,
+                .indirect => gpu.BufferUsages.indirect,
                 else => @compileError("unsupported buffer type"),
-            } | gpu.BufferUsage.copy_dst;
+            } | gpu.BufferUsages.copy_dst;
 
             std.debug.print("creating {s} with size {}...\n", .{ label, buffer_size });
             const buffer = self.graphics.device.createBuffer(&.{
-                .label = label,
+                .label = gpu.StringView.fromSlice(label),
                 .usage = usage,
                 .size = buffer_size,
             }) orelse return Error.FailedToCreateBuffer;
@@ -476,7 +476,7 @@ pub fn Shader(Type: type) type {
 
             // TODO: a lot of config can move into the Texture type
             const gpu_texture = self.graphics.device.createTexture(&.{
-                .usage = gpu.TextureUsage.texture_binding | gpu.TextureUsage.copy_dst,
+                .usage = gpu.TextureUsages.texture_binding | gpu.TextureUsages.copy_dst,
                 .size = .{
                     .width = @intCast(width),
                     .height = @intCast(height),
@@ -543,7 +543,7 @@ pub fn Shader(Type: type) type {
 
             const binding_index = getBindingIndex(Uniform);
 
-            const uniform: *Uniform = @alignCast(@ptrCast(self.binding_ptrs[binding_index]));
+            const uniform: *Uniform = @ptrCast(@alignCast(self.binding_ptrs[binding_index]));
 
             const field_name = @tagName(field_tag);
             const field = &@field(uniform, field_name);

@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const glfw = @import("mach-glfw");
+const glfw = @import("zglfw");
 const gpu = @import("wgpu");
 
 const Graphics = @import("Graphics.zig");
@@ -109,10 +109,10 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
     try self.shader.set(allocator, mesh.chunks);
     try self.shader.set(allocator, mesh.indirects);
 
-    const bind_group_layouts = &[_]*const gpu.BindGroupLayout{self.shader.bind_group_layout};
+    const bind_group_layouts = &[_]*gpu.BindGroupLayout{self.shader.bind_group_layout};
 
     var pipeline_layout_descriptor = gpu.PipelineLayoutDescriptor{
-        .label = "pipeline layout",
+        .label = gpu.StringView.fromSlice("pipeline layout"),
         .bind_group_layout_count = bind_group_layouts.len,
         .bind_group_layouts = bind_group_layouts.ptr,
     };
@@ -132,23 +132,23 @@ pub fn init(allocator: std.mem.Allocator, mesh: Mesh, graphics: Graphics, width:
     self.pipeline = graphics.device.createRenderPipeline(&gpu.RenderPipelineDescriptor{
         .vertex = gpu.VertexState{
             .module = shader_module,
-            .entry_point = "vs_main",
+            .entry_point = gpu.StringView.fromSlice("vs_main"),
             .buffer_count = buffers.len,
             .buffers = buffers.ptr,
         },
         .primitive = gpu.PrimitiveState{
             .cull_mode = .back,
         },
-        .depth_stencil = &.{
+        .depth_stencil = &gpu.DepthStencilState{
             .format = .depth24_plus,
-            .depth_write_enabled = @intFromBool(true),
+            .depth_write_enabled = .true,
             .depth_compare = .less,
             .stencil_front = .{},
             .stencil_back = .{},
         },
         .fragment = &gpu.FragmentState{
             .module = shader_module,
-            .entry_point = "fs_main",
+            .entry_point = gpu.StringView.fromSlice("fs_main"),
             .target_count = color_targets.len,
             .targets = color_targets.ptr,
         },
@@ -172,7 +172,7 @@ pub fn render(self: Renderer, graphics: Graphics, time: f32, camera: Camera) !vo
 
     // setup encoder
     const encoder = graphics.device.createCommandEncoder(&.{
-        .label = "command encoder",
+        .label = gpu.StringView.fromSlice("command encoder"),
     }) orelse return Error.FailedToCreateCommandEncoder;
     defer encoder.release();
 
@@ -184,7 +184,7 @@ pub fn render(self: Renderer, graphics: Graphics, time: f32, camera: Camera) !vo
     }};
 
     const render_pass = encoder.beginRenderPass(&gpu.RenderPassDescriptor{
-        .label = "render pass",
+        .label = gpu.StringView.fromSlice("render pass"),
         .color_attachment_count = color_attachments.len,
         .color_attachments = color_attachments.ptr,
         .depth_stencil_attachment = &.{
@@ -201,7 +201,7 @@ pub fn render(self: Renderer, graphics: Graphics, time: f32, camera: Camera) !vo
     render_pass.release();
 
     const command = encoder.finish(&.{
-        .label = "command buffer",
+        .label = gpu.StringView.fromSlice("command buffer"),
     }) orelse return Error.FailedToFinishEncoder;
     defer command.release();
 
@@ -214,9 +214,9 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
     surface.getCurrentTexture(&surface_texture);
 
     switch (surface_texture.status) {
-        .success => return surface_texture.texture.createView(&.{
-            .label = "surface texture view",
-            .format = surface_texture.texture.getFormat(),
+        .success_optimal, .success_suboptimal => return (surface_texture.texture orelse return Error.FailedToGetCurrentTexture).createView(&.{
+            .label = gpu.StringView.fromSlice("surface texture view"),
+            .format = (surface_texture.texture orelse return Error.FailedToGetCurrentTexture).getFormat(),
             .dimension = .@"2d",
             .mip_level_count = 1,
             .array_layer_count = 1,
@@ -230,7 +230,7 @@ fn getCurrentTextureView(surface: *gpu.Surface) !*gpu.TextureView {
 
 fn initDepth(self: *Renderer, graphics: Graphics) !void {
     self.depth_texture = graphics.device.createTexture(&.{
-        .usage = gpu.TextureUsage.render_attachment,
+        .usage = gpu.TextureUsages.render_attachment,
         .size = .{
             .width = self.width,
             .height = self.height,

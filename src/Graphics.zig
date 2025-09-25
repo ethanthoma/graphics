@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const glfw = @import("mach-glfw");
+const glfw = @import("zglfw");
 const gpu = @import("wgpu");
 
 const Mesh = @import("Mesh.zig");
@@ -20,7 +20,8 @@ queue: *gpu.Queue,
 surface: *gpu.Surface,
 surface_format: gpu.TextureFormat,
 
-pub fn init(mesh: Mesh, window: glfw.Window) !Graphics {
+pub fn init(mesh: Mesh, window: *glfw.Window) !Graphics {
+    _ = mesh; // TODO: Re-enable once limits API is stable
     // create instance
     const instance = gpu.Instance.create(null) orelse return Error.FailedToCreateInstance;
     defer instance.release();
@@ -30,9 +31,7 @@ pub fn init(mesh: Mesh, window: glfw.Window) !Graphics {
     errdefer surface.release();
 
     // get adapter
-    const adapter_response = instance.requestAdapterSync(&.{
-        .compatible_surface = surface,
-    });
+    const adapter_response = instance.requestAdapterSync(&.{ .compatible_surface = surface }, 1000000);
     const adapter: *gpu.Adapter = switch (adapter_response.status) {
         .success => adapter_response.adapter.?,
         else => return Error.FailedToGetAdapter,
@@ -46,12 +45,20 @@ pub fn init(mesh: Mesh, window: glfw.Window) !Graphics {
         .indirect_first_instance,
     };
 
-    const device_response = adapter.requestDeviceSync(&.{
-        .label = "My Device",
-        .required_limits = &getRequiredLimits(mesh, adapter),
+    const push_constant_size = Mesh.getMaxPushSize();
+    var native_limits = gpu.WGPUNativeLimits{
+        .max_push_constant_size = push_constant_size,
+        .max_non_sampler_bindings = gpu.U32_MAX,
+    };
+    const required_limits = gpu.Limits{ .next_in_chain = @ptrCast(&native_limits) };
+
+    const device_response = adapter.requestDeviceSync(instance, &gpu.DeviceDescriptor{
+        .label = gpu.StringView.fromSlice("main device"),
+        .required_limits = &required_limits,
         .required_features = required_features.ptr,
         .required_feature_count = required_features.len,
-    });
+    }, 1000000);
+
     const device = switch (device_response.status) {
         .success => device_response.device.?,
         else => return Error.FailedToGetDevice,
@@ -62,8 +69,16 @@ pub fn init(mesh: Mesh, window: glfw.Window) !Graphics {
     const queue = device.getQueue() orelse return Error.FailedToGetQueue;
 
     // configure surface
-    var capabilites: gpu.SurfaceCapabilities = .{};
-    surface.getCapabilities(adapter, &capabilites);
+    var capabilites = gpu.SurfaceCapabilities{
+        .usages = 0,
+        .format_count = 0,
+        .formats = undefined,
+        .present_mode_count = 0,
+        .present_modes = undefined,
+        .alpha_mode_count = 0,
+        .alpha_modes = undefined,
+    };
+    _ = surface.getCapabilities(adapter, &capabilites);
     const surface_format = capabilites.formats[0];
 
     return .{
@@ -125,19 +140,29 @@ fn getRequiredLimits(mesh: Mesh, adapter: *gpu.Adapter) gpu.RequiredLimits {
 pub fn deinit(self: *Graphics) void {
     self.surface.release();
     self.queue.release();
-    self.surface.release();
     self.device.release();
 }
 
-// wayland only
-fn glfwGetWGPUSurface(instance: *gpu.Instance, window: glfw.Window) !?*gpu.Surface {
-    const Native = glfw.Native(.{ .wayland = true });
+extern fn glfwGetWaylandDisplay() ?*anyopaque;
+extern fn glfwGetWaylandWindow(window: *anyopaque) ?*anyopaque;
 
-    return instance.createSurface(&.{
-        .next_in_chain = &(gpu.SurfaceDescriptorFromWaylandSurface{
-            .display = Native.getWaylandDisplay(),
-            .surface = Native.getWaylandWindow(window),
-        }).chain,
-        .label = null,
-    });
+fn glfwGetWGPUSurface(instance: *gpu.Instance, window: *glfw.Window) !?*gpu.Surface {
+    const builtin = @import("builtin");
+
+    if (builtin.target.os.tag == .linux) {
+        const wayland_display = glfwGetWaylandDisplay();
+        const wayland_surface = glfwGetWaylandWindow(@ptrCast(window));
+
+        if (wayland_display != null and wayland_surface != null) {
+            const descriptor = gpu.surfaceDescriptorFromWaylandSurface(.{
+                .display = wayland_display.?,
+                .surface = wayland_surface.?,
+            });
+            return instance.createSurface(&descriptor);
+        }
+
+        std.debug.print("Error: Wayland display/surface not available\n", .{});
+    }
+
+    return Error.FailedToCreateSurface;
 }

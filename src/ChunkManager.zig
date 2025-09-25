@@ -23,9 +23,10 @@ pub fn init(allocator: std.mem.Allocator) ChunkManager {
 }
 
 pub fn deinit(self: *ChunkManager) void {
-    for (self.meshes.values()) |*mesh| mesh.deinit();
+    for (self.meshes.values()) |*mesh| {
+        if (mesh.*) |*m| m.deinit();
+    }
     self.meshes.deinit();
-    self.allocator.destroy(self);
 }
 
 pub fn update(self: *ChunkManager, position: Vec3(f32)) !?Mesh {
@@ -121,26 +122,26 @@ pub fn getMergedMesh(self: *ChunkManager) !Mesh {
     for (self.meshes.keys(), 0..) |position, index| {
         _ = index;
         if (self.meshes.get(position).?) |mesh| {
-            try all_points.appendSlice(mesh.points);
+            try all_points.appendSlice(self.allocator, mesh.points);
 
             assert(mesh.chunks.len == 1);
-            try all_chunks.append(mesh.chunks[0]);
+            try all_chunks.append(self.allocator, mesh.chunks[0]);
 
             assert(mesh.indirects.len == 1);
             var indirect = mesh.indirects[0];
 
             indirect.first_instance += offset;
             offset += indirect.instance_count;
-            try all_indirects.append(indirect);
+            try all_indirects.append(self.allocator, indirect);
         }
     }
 
     return .{
         .allocator = self.allocator,
-        .points = try all_points.toOwnedSlice(),
-        .chunks = try all_chunks.toOwnedSlice(),
+        .points = try all_points.toOwnedSlice(self.allocator),
+        .chunks = try all_chunks.toOwnedSlice(self.allocator),
         .camera = .{},
-        .indirects = try all_indirects.toOwnedSlice(),
+        .indirects = try all_indirects.toOwnedSlice(self.allocator),
     };
 }
 

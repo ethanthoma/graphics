@@ -1,4 +1,4 @@
-const glfw = @import("mach-glfw");
+const glfw = @import("zglfw");
 
 const math = @import("math.zig");
 const Vec3f = math.Vec3(f32);
@@ -22,12 +22,12 @@ mouse_position: Vec2fd = @splat(0),
 mouse_delta: Vec2f = @splat(0),
 is_mouse_captured: bool = false,
 
-pub fn updateKey(self: *@This(), key: glfw.Key, action: glfw.Action) void {
-    const is_press = action == .press;
-    const is_release = action == .release;
+pub fn updateKey(self: *@This(), key: c_int, action: c_int) void {
+    const is_press = action == glfw.Press;
+    const is_release = action == glfw.Release;
 
     switch (key) {
-        .a => if (is_press or is_release) {
+        glfw.KeyA => if (is_press or is_release) {
             self.pressed_a = is_press;
             if (is_press) {
                 self.horizontal = .left;
@@ -37,7 +37,7 @@ pub fn updateKey(self: *@This(), key: glfw.Key, action: glfw.Action) void {
                 self.horizontal = .none;
             }
         },
-        .d => if (is_press or is_release) {
+        glfw.KeyD => if (is_press or is_release) {
             self.pressed_d = is_press;
             if (is_press) {
                 self.horizontal = .right;
@@ -47,7 +47,7 @@ pub fn updateKey(self: *@This(), key: glfw.Key, action: glfw.Action) void {
                 self.horizontal = .none;
             }
         },
-        .w => if (is_press or is_release) {
+        glfw.KeyW => if (is_press or is_release) {
             self.pressed_w = is_press;
             if (is_press) {
                 self.forward = .forward;
@@ -57,7 +57,7 @@ pub fn updateKey(self: *@This(), key: glfw.Key, action: glfw.Action) void {
                 self.forward = .none;
             }
         },
-        .s => if (is_press or is_release) {
+        glfw.KeyS => if (is_press or is_release) {
             self.pressed_s = is_press;
             if (is_press) {
                 self.forward = .backward;
@@ -67,7 +67,7 @@ pub fn updateKey(self: *@This(), key: glfw.Key, action: glfw.Action) void {
                 self.forward = .none;
             }
         },
-        .space => if (is_press or is_release) {
+        glfw.KeySpace => if (is_press or is_release) {
             self.pressed_space = is_press;
             if (is_press) {
                 self.vertical = .up;
@@ -77,7 +77,7 @@ pub fn updateKey(self: *@This(), key: glfw.Key, action: glfw.Action) void {
                 self.vertical = .none;
             }
         },
-        .left_shift => if (is_press or is_release) {
+        glfw.KeyLeftShift => if (is_press or is_release) {
             self.pressed_shift = is_press;
             if (is_press) {
                 self.vertical = .down;

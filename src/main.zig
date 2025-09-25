@@ -7,7 +7,10 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     var app = try App.init(allocator);
-    defer app.deinit();
+    defer {
+        app.deinit();
+        allocator.destroy(app);
+    }
 
     while (app.isRunning()) {
         try app.run();

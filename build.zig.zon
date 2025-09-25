@@ -1,16 +1,20 @@
 .{
-    .name = "default",
-
+    .fingerprint = 0xc0c9bc5876e61fad,
+    .name = .graphics,
     .version = "0.0.0",
 
     .dependencies = .{
-        .mach_glfw = .{
-            .url = "https://pkg.machengine.org/mach-glfw/daeb7b10187249aade7d92ccfef8dcf5a94f8148.tar.gz",
-            .hash = "12207f4bba892c44b3b1b92b13b7ce5df2b49da1e797ba3e02b38b08d1e78c5cec0d",
+        .zglfw = .{
+            .url = "https://github.com/IridescenceTech/zglfw/archive/master.tar.gz",
+            .hash = "zglfw-0.1.0-BghZXabUAACfsXVTPWvmy44XLsc-wux2G9w8Mbp523pJ",
+        },
+        .glfw_zig = .{
+            .url = "git+https://github.com/tiawl/glfw.zig?ref=X11.zig-xtrans-1.6.0#9a1176fb48ad202a8ef21854818b4df9fcbc3bb5",
+            .hash = "glfw_zig-1.0.0-NrvYo7rXGQB9KqwnBXX75kq8z_sJg0cpB9tCN_2TvVu1",
         },
         .wgpu_native_zig = .{
-            .url = "https://github.com/ethanthoma/wgpu-native-zig/archive/3b5155fafe5c164b00205890ad9a6e7e5f04f40c.tar.gz",
-            .hash = "12202d308411c994e286f2dc78edca5eda5446929b9a10dbbedc68b56dbaaeb532d3",
+            .url = "https://github.com/carrot-sticks/wgpu_native_zig/archive/zig-v0.15.1.tar.gz",
+            .hash = "wgpu_native_zig-6.5.0-B9jeDGhzAwDKk_uGG5fG5vO7uzmzwj-EQ-DLrmR2wpdK",
         },
     },
 
